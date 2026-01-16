@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
+import ThemeToggle from './ThemeToggle';
 
 const Header = ({ user, onLogin }) => {
     const location = useLocation();
@@ -45,6 +46,8 @@ const Header = ({ user, onLogin }) => {
                 alignItems: 'center',
                 gap: 'var(--spacing-md)'
             }}>
+                <ThemeToggle />
+
                 {/* Search Bar */}
                 <div
                     style={{

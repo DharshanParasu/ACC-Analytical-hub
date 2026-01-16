@@ -6,7 +6,7 @@ import analyticsService from '../../services/analyticsService';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
-const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds }) => {
+const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds, joinedData, masterData }) => {
     const chartRef = useRef();
     const { title = 'Pie Chart', data: customData, attribute, filters, logicalOperator } = config;
     const [chartData, setChartData] = useState(null);
@@ -17,14 +17,26 @@ const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
         if (viewer && attribute) {
             loadModelData();
         }
-    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds]);
+    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds, joinedData, masterData]);
 
     const loadModelData = async () => {
         setLoading(true);
         try {
             const aggType = config.aggregationType || 'count';
             const sumAttr = aggType === 'sum' ? (config.sumAttribute || null) : null;
-            const agg = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds);
+
+            let agg;
+
+            if (masterData && masterData.length > 0) {
+                // FAST PATH: Synchronous Aggregation from Master Data
+                console.log('[PieChart] Using Master Data for aggregation');
+                agg = analyticsService.aggregateFromMasterData(masterData, attribute, filters, logicalOperator, sumAttr, scopedDbIds);
+            } else {
+                // SLOW PATH: Async Query against Viewer
+                console.log('[PieChart] Using Viewer Query (Legacy) for aggregation');
+                agg = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds, joinedData);
+            }
+
             setAggregation(agg);
             const data = analyticsService.getChartData(agg, attribute, 'Total', 'pie', aggType);
             setChartData(data);

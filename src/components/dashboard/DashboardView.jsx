@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import GridLayout from 'react-grid-layout';
@@ -12,6 +12,7 @@ import DataTable from '../charts/DataTable';
 import APSViewer from '../viewer/APSViewer';
 import AIChatBot from '../ai/AIChatBot';
 import PropertyFilter from './PropertyFilter';
+import ScheduleVisual from '../charts/ScheduleVisual';
 import exportUtils from '../../utils/exportUtils';
 
 const componentTypes = [
@@ -22,6 +23,7 @@ const componentTypes = [
     { type: 'line', component: LineChart },
     { type: 'kpi', component: KPICard },
     { type: 'table', component: DataTable },
+    { type: 'schedule', component: ScheduleVisual },
     { type: 'chatbot', component: AIChatBot }
 ];
 
@@ -55,6 +57,9 @@ class ErrorBoundary extends React.Component {
     }
 }
 
+import { analyticsService } from '../../services/analyticsService';
+import apsService from '../../services/apsService';
+
 const DashboardView = () => {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -73,7 +78,18 @@ const DashboardView = () => {
             const data = storageService.getDashboard(id);
             if (data) {
                 setDashboard(data);
-                setGlobalModel(data.globalModel);
+                // Handle both legacy (globalModel) and new (projectData.model) structures
+                const modelData = data.projectData?.model || data.globalModel;
+
+                // Normalize to ensure we have modelUrn
+                if (modelData) {
+                    // Check if it's the new format (urn) or old (modelUrn)
+                    const normalizedModel = {
+                        ...modelData,
+                        modelUrn: modelData.urn || modelData.modelUrn
+                    };
+                    setGlobalModel(normalizedModel);
+                }
             }
         } catch (err) {
             console.error("Error loading dashboard data:", err);
@@ -82,12 +98,48 @@ const DashboardView = () => {
         }
     }, [id]);
 
+    // Unified Data State (Master Data)
+    const [masterData, setMasterData] = useState([]);
+
+
+
+    // Responsive Canvas Logic
+    const [canvasWidth, setCanvasWidth] = useState(1200);
+    const canvasRef = useRef(null);
+
+    useEffect(() => {
+        if (!canvasRef.current) return;
+
+        const resizeObserver = new ResizeObserver(entries => {
+            for (let entry of entries) {
+                // Subtract padding if needed, assuming 40px for safety (20px padding * 2)
+                setCanvasWidth(entry.contentRect.width - 40);
+            }
+        });
+
+        resizeObserver.observe(canvasRef.current);
+        return () => resizeObserver.disconnect();
+    }, []);
+
+    // Auto-load data when model is ready (replacing old processJoins)
+    const handleModelLoaded = async (viewerInstance) => {
+        console.log('[DashboardView] Model loaded, enabling charts.');
+        const targetViewer = viewerInstance || viewer;
+        if (targetViewer) {
+            setModelLoaded(true);
+            setViewer(targetViewer);
+            // Trigger initial data load
+            await refreshData(targetViewer);
+        }
+    };
+
     const handleViewerReady = (viewerInstance) => {
         setViewer(viewerInstance);
 
         // Listen for selection changes
         try {
             viewerInstance.addEventListener(window.Autodesk.Viewing.SELECTION_CHANGED_EVENT, (event) => {
+                // Check current sync state from ref or state (ensure closure freshness)
                 if (!interactionSync) return;
                 const selection = viewerInstance.getSelection();
                 setCurrentSelection(selection);
@@ -97,10 +149,7 @@ const DashboardView = () => {
         }
     };
 
-    const handleModelLoaded = (viewerInstance) => {
-        console.log('[DashboardView] Model loaded, enabling charts.');
-        setModelLoaded(true);
-    };
+
 
     const hexToVector4 = (hex) => {
         if (!hex) return null;
@@ -159,7 +208,7 @@ const DashboardView = () => {
                 <ComponentType
                     config={comp.config}
                     modelUrn={globalModel?.modelUrn}
-                    modelName={globalModel?.model?.name}
+                    modelName={globalModel?.name}
                     onViewerReady={handleViewerReady}
                     onModelLoaded={handleModelLoaded}
                 />
@@ -174,9 +223,64 @@ const DashboardView = () => {
                     onDataClick={handleFilterClicked}
                     onThematicColorChange={handleThematicColorChange}
                     scopedDbIds={interactionSync && currentSelection.length > 0 ? currentSelection : null}
+                    masterData={masterData}
                 />
             </div>
         );
+    };
+
+    // State for refresh loading
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const refreshData = async (viewerOverride = null) => {
+        const targetViewer = viewerOverride || viewer;
+        console.log('[DashboardView] Refresh Clicked', targetViewer ? 'with viewer' : 'no viewer');
+
+        if (!dashboard?.projectData) return;
+
+        setIsRefreshing(true);
+
+        try {
+            const projectData = dashboard.projectData;
+            const newSources = { ...projectData.sources };
+
+            // Only refresh Excel if we have a token (skipping deeply nested redundant checks for brevity, assuming similar logic to Builder)
+            // Ideally we would share this "refresh sources" logic in a service, but for now we keep it inline to minimize diff risk.
+            if (projectData.sources) {
+                const token = await apsService.getAccessToken();
+                if (token) {
+                    for (const [key, source] of Object.entries(newSources)) {
+                        if (source.fileUrn && source.type === 'excel') {
+                            try {
+                                const arrayBuffer = await apsService.getFileContent(source.fileUrn, token);
+                                const workbook = window.XLSX.read(arrayBuffer, { type: 'array' });
+                                const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                                newSources[key] = { ...source, data: jsonData, lastUpdated: new Date().toISOString() };
+                            } catch (e) { console.error('Refesh error', e); }
+                        }
+                    }
+                }
+            }
+
+            // Re-fetch ALL Master Data (Calculation happens here inside getAllData)
+            if (targetViewer) {
+                const updatedProjectData = { ...projectData, sources: newSources };
+                // Update local dashboard state to keep it in sync
+                setDashboard(prev => ({ ...prev, projectData: updatedProjectData }));
+
+                const allData = await analyticsService.getAllData(targetViewer, updatedProjectData);
+                if (allData && allData.length > 0) {
+                    setMasterData(allData);
+                    console.log('[DashboardView] Master Data Processed:', allData.length);
+                }
+            }
+
+        } catch (error) {
+            console.error('[DashboardView] Error refreshing data:', error);
+            alert(`Error during refresh: ${error.message}`);
+        } finally {
+            setIsRefreshing(false);
+        }
     };
 
     if (loading) {
@@ -225,6 +329,20 @@ const DashboardView = () => {
                         <p style={{ color: 'var(--color-text-subdued)', margin: 0 }}>{dashboard.description}</p>
                     </div>
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <button
+                            onClick={refreshData}
+                            disabled={isRefreshing}
+                            className="btn btn-secondary"
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                        >
+                            {isRefreshing ? (
+                                <div className="spinner-sm" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                            ) : (
+                                <span>🔄</span>
+                            )}
+                            {isRefreshing ? 'Refreshing & Calculating...' : 'Refresh Data'}
+                        </button>
+
                         {viewer && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '16px', padding: '6px 12px', background: 'var(--color-bg-base)', borderRadius: '20px', border: '1px solid var(--color-border)' }}>
                                 <label style={{ fontSize: '12px', fontWeight: '600', color: interactionSync ? 'var(--color-primary)' : 'var(--color-text-subdued)', cursor: 'pointer' }}>
@@ -249,11 +367,11 @@ const DashboardView = () => {
                             </div>
                         )}
                         <button
-                            onClick={() => exportUtils.downloadDashboard(dashboard)}
                             className="btn btn-secondary"
-                            style={{ background: 'var(--color-bg-base)', border: '1px solid var(--color-border)' }}
+                            onClick={() => exportUtils.exportToHTML(dashboard, 'dashboard-canvas')}
+                            style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
                         >
-                            📥 Export HTML
+                            <span>📄</span> EXPORT HTML
                         </button>
                         <button onClick={() => navigate(`/dashboard/edit/${id}`)} className="btn btn-secondary">✏️ Edit</button>
                         <button onClick={() => navigate('/overview')} className="btn btn-secondary">Exit</button>
@@ -261,24 +379,18 @@ const DashboardView = () => {
                 </div>
 
                 {/* Grid Layout */}
-                <div style={{ flex: 1, position: 'relative', overflow: 'auto', padding: '20px' }}>
+                <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'auto', padding: '20px' }} id="dashboard-canvas">
                     <GridLayout
                         className="layout"
                         layout={layout}
                         cols={12}
-                        rowHeight={80}
-                        width={1200}
+                        rowHeight={30}
+                        width={canvasWidth}
                         isDraggable={false}
                         isResizable={false}
-                        margin={[16, 16]}
                     >
-                        {dashboard.components.map((comp) => (
-                            <div key={comp.id} style={{
-                                background: 'var(--color-bg-base)',
-                                borderRadius: 'var(--radius-md)',
-                                overflow: 'hidden',
-                                border: '1px solid var(--color-border)'
-                            }}>
+                        {dashboard.components.map(comp => (
+                            <div key={comp.id} style={{ border: '1px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden', background: 'var(--color-bg-elevated)' }}>
                                 {renderComponent(comp)}
                             </div>
                         ))}

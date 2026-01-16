@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Analytical Hub - Dashboard Analytics Platform</title>
+    
+    <!-- APS Viewer SDK -->
+    <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css" type="text/css">
+    <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
+    <script type="module" crossorigin src="/assets/index-CHxASjeK.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-TM5PiwQp.css">
+  </head>
+  <body>
+    <script>
+      // If we are on port 8080 (Auth Redirect), pass the code to the main app on port 3000
+      if (window.location.port === '8080') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        if (code) {
+          window.location.href = `http://localhost:3000/?code=${code}`;
+        }
+      }
+    </script>
+    <div id="root"></div>
+  </body>
+</html>

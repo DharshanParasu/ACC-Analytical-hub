@@ -48,9 +48,11 @@ const APSViewer = ({ config = {}, modelUrn, modelName, onViewerReady, onModelLoa
 
     // 2. Load Model when viewer is ready or selection changes
     useEffect(() => {
+        console.log('[APSViewer] Prop Update:', { viewer: !!viewer, modelUrn });
         if (!viewer || !modelUrn) return;
 
         const documentId = `urn:${modelUrn}`;
+        console.log('[APSViewer] Loading Document:', documentId);
 
         // Event listener for when model structure/properties are ready
         const onModelReady = () => {
@@ -176,20 +178,28 @@ const APSViewer = ({ config = {}, modelUrn, modelName, onViewerReady, onModelLoa
                             alignItems: 'center',
                             justifyContent: 'center',
                             padding: 'var(--spacing-xl)',
-                            textAlign: 'center'
+                            textAlign: 'center',
+                            zIndex: 10,
+                            background: 'var(--color-bg-press)' // Ensure opacity
                         }}>
                             <div style={{ fontSize: '64px', marginBottom: 'var(--spacing-md)' }}>
-                                {modelUrn ? '🏗️' : '📁'}
+                                {error ? '⚠️' : (modelUrn ? '🏗️' : '📁')}
                             </div>
                             <div style={{
                                 fontSize: 'var(--font-size-lg)',
                                 fontWeight: 'var(--font-weight-semibold)',
-                                color: 'var(--color-text-base)',
+                                color: error ? 'var(--color-error)' : 'var(--color-text-base)',
                                 marginBottom: 'var(--spacing-sm)'
                             }}>
-                                {modelUrn ? (modelName || 'Loading Model...') : 'No Model Selected'}
+                                {error ? error : (modelUrn ? (modelName || 'Loading Model...') : 'No Model Selected')}
                             </div>
-                            {!modelUrn && (
+                            {error && (
+                                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-subdued)', marginBottom: 'var(--spacing-md)' }}>
+                                    Check console for details.
+                                </div>
+                            )}
+
+                            {!modelUrn && !error && (
                                 <>
                                     <div style={{
                                         fontSize: 'var(--font-size-sm)',

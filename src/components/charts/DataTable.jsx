@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
 
-const DataTable = ({ config = {}, viewer, onDataClick }) => {
+const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData }) => {
     const { title = 'Data Table', data: customData, attribute, attributes = [], filters, logicalOperator } = config;
     const [tableData, setTableData] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -14,13 +14,33 @@ const DataTable = ({ config = {}, viewer, onDataClick }) => {
         if (viewer && targetAttributes.length > 0) {
             loadModelData();
         }
-    }, [viewer, JSON.stringify(targetAttributes), JSON.stringify(filters), logicalOperator]);
+    }, [viewer, JSON.stringify(targetAttributes), JSON.stringify(filters), logicalOperator, masterData, joinedData]);
 
     const loadModelData = async () => {
         setLoading(true);
         try {
-            const agg = await analyticsService.aggregateByMultipleProperties(viewer, targetAttributes, filters, logicalOperator);
-            const data = analyticsService.getTableData(agg, targetAttributes);
+            let data;
+            let agg;
+
+            if (masterData && masterData.length > 0) {
+                // FAST PATH: Sync Table generation
+                console.log('[DataTable] Using Master Data');
+                data = analyticsService.getTableDataFromMaster(masterData, targetAttributes, filters, logicalOperator);
+                // We need agg for total count calculation
+                // For now, reconstruct 'agg' or simplify total calc
+                const tempAgg = {};
+                data.forEach(d => {
+                    const key = JSON.stringify(targetAttributes.map(a => d[a]));
+                    if (!tempAgg[key]) tempAgg[key] = d.dbIds;
+                });
+                agg = tempAgg;
+
+            } else {
+                // SLOW PATH: Async
+                console.log('[DataTable] Using Viewer Query (Legacy)');
+                agg = await analyticsService.aggregateByMultipleProperties(viewer, targetAttributes, filters, logicalOperator, null, joinedData);
+                data = analyticsService.getTableData(agg, targetAttributes);
+            }
 
             const totalInView = Object.values(agg).reduce((sum, ids) => sum + ids.length, 0);
 
