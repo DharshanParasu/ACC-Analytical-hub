@@ -14,6 +14,8 @@ import AIChatBot from '../ai/AIChatBot';
 import PropertyFilter from './PropertyFilter';
 import ScheduleVisual from '../charts/ScheduleVisual';
 import exportUtils from '../../utils/exportUtils';
+import { analyticsService } from '../../services/analyticsService';
+import apsService from '../../services/apsService';
 
 const componentTypes = [
     { type: 'viewer', component: APSViewer },
@@ -57,8 +59,7 @@ class ErrorBoundary extends React.Component {
     }
 }
 
-import { analyticsService } from '../../services/analyticsService';
-import apsService from '../../services/apsService';
+
 
 const DashboardView = () => {
     const { id } = useParams();
@@ -72,6 +73,13 @@ const DashboardView = () => {
     // Interaction Sync State - Default to true for consumers
     const [currentSelection, setCurrentSelection] = useState([]);
     const [interactionSync, setInteractionSync] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    useEffect(() => {
+        if (window.eva) {
+            window.eva.replace({ fill: 'currentColor' });
+        }
+    }, [dashboard, isRefreshing, interactionSync]);
 
     useEffect(() => {
         try {
@@ -97,6 +105,8 @@ const DashboardView = () => {
             setLoading(false);
         }
     }, [id]);
+
+
 
     // Unified Data State (Master Data)
     const [masterData, setMasterData] = useState([]);
@@ -229,8 +239,6 @@ const DashboardView = () => {
         );
     };
 
-    // State for refresh loading
-    const [isRefreshing, setIsRefreshing] = useState(false);
 
     const refreshData = async (viewerOverride = null) => {
         const targetViewer = viewerOverride || viewer;
@@ -312,74 +320,75 @@ const DashboardView = () => {
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                style={{ width: '100%', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
+                className="w-full min-h-screen flex flex-col"
             >
                 {/* Header */}
-                <div style={{
-                    padding: 'var(--spacing-lg)',
-                    borderBottom: '1px solid var(--color-border)',
-                    background: 'var(--color-bg-elevated)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    zIndex: 10
-                }}>
+                <div className="p-6 border-b border-white/10 bg-[#030508]/80 backdrop-blur-md flex justify-between items-center z-10 sticky top-0">
                     <div>
-                        <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>{dashboard.name}</h1>
-                        <p style={{ color: 'var(--color-text-subdued)', margin: 0 }}>{dashboard.description}</p>
+                        <h1 className="text-2xl font-black text-white m-0 tracking-tight">{dashboard.name}</h1>
+                        <p className="text-gray-400 text-sm mt-1">{dashboard.description}</p>
                     </div>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <div className="flex gap-3 items-center">
                         <button
                             onClick={refreshData}
                             disabled={isRefreshing}
-                            className="btn btn-secondary"
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                            className="bg-white/5 border border-white/10 text-white rounded-full font-medium hover:bg-white/10 transition-colors flex items-center gap-2 px-5 py-2 text-sm"
                         >
                             {isRefreshing ? (
-                                <div className="spinner-sm" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                             ) : (
-                                <span>🔄</span>
+                                <span>
+                                    <i data-eva="refresh-outline" className="w-4 h-4"></i>
+                                </span>
                             )}
-                            {isRefreshing ? 'Refreshing & Calculating...' : 'Refresh Data'}
+                            {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
                         </button>
 
                         {viewer && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '16px', padding: '6px 12px', background: 'var(--color-bg-base)', borderRadius: '20px', border: '1px solid var(--color-border)' }}>
-                                <label style={{ fontSize: '12px', fontWeight: '600', color: interactionSync ? 'var(--color-primary)' : 'var(--color-text-subdued)', cursor: 'pointer' }}>
-                                    ⚡ SYNC
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/10">
+                                <label className={`text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 ${interactionSync ? 'text-lime-400' : 'text-gray-500'}`}>
+                                    <span>
+                                        <i data-eva="flash-outline" className={`w-3.5 h-3.5 ${interactionSync ? 'text-lime-400' : 'text-gray-500'}`}></i>
+                                    </span>
+                                    SYNC
                                 </label>
                                 <div
                                     onClick={() => {
                                         setInteractionSync(!interactionSync);
                                         if (interactionSync) setCurrentSelection([]);
                                     }}
-                                    style={{
-                                        width: '32px', height: '18px',
-                                        background: interactionSync ? 'var(--color-primary)' : 'gray',
-                                        borderRadius: '9px', position: 'relative', cursor: 'pointer', transition: 'all 0.2s'
-                                    }}
+                                    className={`w-8 h-4.5 rounded-full relative cursor-pointer transition-colors ${interactionSync ? 'bg-lime-500' : 'bg-gray-600'}`}
                                 >
-                                    <div style={{
-                                        width: '14px', height: '14px', background: 'white', borderRadius: '50%',
-                                        position: 'absolute', top: '2px', left: interactionSync ? '16px' : '2px', transition: 'all 0.2s'
-                                    }} />
+                                    <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${interactionSync ? 'left-4' : 'left-0.5'}`} />
                                 </div>
                             </div>
                         )}
                         <button
-                            className="btn btn-secondary"
+                            className="bg-white/5 border border-white/10 text-white rounded-full font-medium hover:bg-white/10 transition-colors flex items-center gap-2 px-5 py-2 text-sm"
                             onClick={() => exportUtils.exportToHTML(dashboard, 'dashboard-canvas')}
-                            style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
                         >
-                            <span>📄</span> EXPORT HTML
+                            <span>
+                                <i data-eva="file-text-outline" className="w-4 h-4 text-cyan-400"></i>
+                            </span>
+                            Export HTML
                         </button>
-                        <button onClick={() => navigate(`/dashboard/edit/${id}`)} className="btn btn-secondary">✏️ Edit</button>
-                        <button onClick={() => navigate('/overview')} className="btn btn-secondary">Exit</button>
+                        <button onClick={() => navigate(`/dashboard/edit/${id}`)} className="btn btn-secondary rounded-full flex items-center gap-2">
+                            <span>
+                                <i data-eva="edit-2-outline" className="w-4 h-4"></i>
+                            </span>
+                            Edit
+                        </button>
+                        <button onClick={() => navigate('/overview')} className="btn btn-secondary rounded-full flex items-center gap-2">
+                            <span>
+                                <i data-eva="log-out-outline" className="w-4 h-4"></i>
+                            </span>
+                            Exit
+                        </button>
                     </div>
                 </div>
 
                 {/* Grid Layout */}
-                <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'auto', padding: '20px' }} id="dashboard-canvas">
+                <div ref={canvasRef} className="flex-1 relative overflow-auto p-6" id="dashboard-canvas">
                     <GridLayout
                         className="layout"
                         layout={layout}
@@ -390,7 +399,7 @@ const DashboardView = () => {
                         isResizable={false}
                     >
                         {dashboard.components.map(comp => (
-                            <div key={comp.id} style={{ border: '1px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden', background: 'var(--color-bg-elevated)' }}>
+                            <div key={comp.id} className="border border-white/5 rounded-2xl overflow-hidden bg-white/5 backdrop-blur-sm shadow-xl">
                                 {renderComponent(comp)}
                             </div>
                         ))}

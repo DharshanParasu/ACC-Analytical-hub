@@ -106,121 +106,98 @@ function App() {
     setIsLoading(false);
   };
 
+  useEffect(() => {
+    if (window.eva) {
+      window.eva.replace({
+        fill: 'currentColor'
+      });
+    }
+  }, [isAuthenticated, user]);
+
   return (
     <GlobalErrorBoundary>
       <ThemeProvider>
         <Router>
-          <div style={{
-            display: 'flex',
-            minHeight: '100vh',
-            background: 'var(--color-bg-base)',
-            color: 'var(--color-text-base)',
-            transition: 'background-color 0.2s, color 0.2s'
-          }}>
+          <div className="flex min-h-screen bg-[var(--color-bg-base)] text-white transition-colors duration-200">
             <Sidebar
               user={user}
               isCollapsed={sidebarCollapsed}
               toggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
 
-            <div style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              marginLeft: sidebarWidth,
-              transition: 'margin-left 0.3s ease'
-            }}>
+            <div className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
               <Header user={user} onLogin={() => apsService.login()} />
 
-              <main style={{
-                flex: 1,
-                padding: 'var(--spacing-xl)',
-                overflow: 'auto',
-                background: 'var(--color-bg-base)'
-              }}>
+              <main className="flex-1 p-8 overflow-auto bg-[var(--color-bg-base)] relative">
                 {!isAuthenticated ? (
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    height: '100%',
-                    textAlign: 'center',
-                    maxWidth: '600px',
-                    margin: '0 auto'
-                  }}>
-                    <div style={{ fontSize: '4rem', marginBottom: '1.5rem' }}>🔐</div>
-                    <h1 style={{ fontSize: '2.5rem', marginBottom: '1rem', fontWeight: '800' }}>
-                      Analytical Hub
+                  <div className="flex flex-col items-center justify-center min-h-[80vh] text-center max-w-2xl mx-auto animate-fade-in relative z-10">
+
+                    {/* Hero Icon */}
+                    <div className="w-24 h-24 mb-8 rounded-3xl bg-gradient-to-br from-lime-400 to-cyan-400 flex items-center justify-center shadow-[0_0_40px_rgba(204,246,85,0.3)] animate-scale-in">
+                      <span className="text-4xl text-black/80 flex items-center justify-center w-full h-full">
+                        <span>
+                          <i data-eva="flash" className="w-12 h-12"></i>
+                        </span>
+                      </span>
+                    </div>
+
+                    <h1 className="text-5xl md:text-6xl font-black mb-4 tracking-tighter">
+                      Analytical <span className="text-transparent bg-clip-text bg-gradient-to-r from-lime-300 to-cyan-300">Hub</span>
                     </h1>
-                    <p style={{
-                      color: 'var(--color-text-subdued)',
-                      marginBottom: '2.5rem',
-                      fontSize: '1.1rem',
-                      lineHeight: '1.6'
-                    }}>
-                      Connect your Autodesk projects to visualize data-driven insights.
-                      Login to browse your ACC files or paste a token directly.
+
+                    <p className="text-gray-400 mb-10 text-lg max-w-lg leading-relaxed">
+                      Visualize data-driven insights from your Autodesk projects.
+                      <span className="block mt-2 text-sm font-mono text-lime-400/80">Connect. Analyze. Optimize.</span>
                     </p>
 
-                    <div style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 'var(--spacing-lg)',
-                      width: '100%',
-                      background: 'var(--color-bg-elevated)',
-                      padding: 'var(--spacing-xl)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid var(--color-border)'
-                    }}>
+                    <div className="w-full glass-panel p-8 border border-white/10 relative overflow-hidden group">
+                      {/* Glow Effect */}
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-lime-400/10 blur-[80px] rounded-full pointer-events-none group-hover:bg-lime-400/20 transition-all duration-700"></div>
+
                       {/* Option 1: Standard Login */}
-                      <div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-subdued)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Recommended</div>
+                      <div className="mb-8 relative z-10">
+                        <div className="text-xs font-mono text-gray-500 mb-3 uppercase tracking-widest flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-lime-400"></span> Recommended
+                        </div>
                         <button
                           onClick={() => apsService.login()}
-                          className="btn btn-primary"
-                          style={{ padding: '14px 32px', fontSize: '1rem', width: '100%', fontWeight: '600' }}
+                          className="btn btn-primary w-full py-4 text-lg shadow-[0_0_20px_rgba(204,246,85,0.2)] hover:shadow-[0_0_35px_rgba(204,246,85,0.5)] flex items-center justify-center gap-3"
                         >
+                          <span>
+                            <i data-eva="log-in" className="w-5 h-5"></i>
+                          </span>
                           Login with Autodesk
                         </button>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '0.5rem 0' }}>
-                        <div style={{ flex: 1, height: '1px', background: 'var(--color-border)' }}></div>
-                        <span style={{ fontSize: '0.9rem', color: 'var(--color-text-subdued)' }}>OR</span>
-                        <div style={{ flex: 1, height: '1px', background: 'var(--color-border)' }}></div>
+                      <div className="flex items-center gap-4 my-6 opacity-30">
+                        <div className="h-px bg-white flex-1"></div>
+                        <span className="text-xs font-mono uppercase">Or via Token</span>
+                        <div className="h-px bg-white flex-1"></div>
                       </div>
 
                       {/* Option 2: Direct Token */}
-                      <form onSubmit={handleDirectTokenSubmit} style={{ textAlign: 'left' }}>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-subdued)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Developer / Direct Access</div>
-                        <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                      <form onSubmit={handleDirectTokenSubmit} className="text-left relative z-10">
+                        <div className="flex gap-3">
                           <input
                             type="password"
-                            placeholder="Paste Access Token here..."
+                            placeholder="Paste Access Token..."
                             value={directToken}
                             onChange={(e) => setDirectToken(e.target.value)}
-                            style={{
-                              flex: 1,
-                              background: 'var(--color-bg-base)',
-                              border: '1px solid var(--color-border)',
-                              padding: '12px 16px',
-                              borderRadius: 'var(--radius-md)',
-                              color: 'var(--color-text-base)',
-                              outline: 'none',
-                              fontSize: '0.9rem'
-                            }}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-cyan-400 focus:bg-black/60 transition-all"
                           />
                           <button
                             type="submit"
-                            className="btn"
-                            style={{ background: 'var(--color-bg-highlight)', color: 'white', padding: '0 20px' }}
+                            className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-white font-medium transition-all hover:scale-105 active:scale-95"
                           >
                             Go
                           </button>
                         </div>
-                        <p style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: 'var(--color-text-subdued)' }}>
-                          Note: Direct tokens are for testing and usually expire in 60 minutes.
+                        <p className="mt-3 text-xs text-gray-500 flex items-center gap-1">
+                          <span>
+                            <i data-eva="alert-circle-outline" className="w-3 h-3"></i>
+                          </span>
+                          Direct tokens expire in 60 minutes
                         </p>
                       </form>
                     </div>

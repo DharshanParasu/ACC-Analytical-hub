@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -6,78 +7,48 @@ const Sidebar = ({ user, isCollapsed, toggleCollapse }) => {
 
     const menuItems = [
         {
-            icon: '🏠',
+            icon: 'home-outline',
             label: 'Home',
             path: '/overview'
         },
         {
-            icon: '➕',
+            icon: 'plus-outline',
             label: 'Create Dashboard',
             path: '/dashboard/new'
         },
     ];
 
+    useEffect(() => {
+        if (window.eva) {
+            window.eva.replace({ fill: 'currentColor' });
+        }
+    }, [isCollapsed, location.pathname, user]);
+
     return (
         <aside
-            style={{
-                position: 'fixed',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: isCollapsed ? '64px' : '240px',
-                background: 'var(--color-bg-base)',
-                padding: isCollapsed ? '16px 8px' : 'var(--spacing-lg)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--spacing-md)',
-                zIndex: 'var(--z-fixed)',
-                borderRight: '1px solid var(--color-border)',
-                transition: 'width 0.3s ease, padding 0.3s ease',
-                overflow: 'hidden'
-            }}
+            className={`fixed left-0 top-0 bottom-0 flex flex-col gap-4 z-[1030] border-r border-white/10 bg-[#030508] transition-all duration-300 ease-in-out ${isCollapsed ? 'w-16 p-4' : 'w-64 p-6'}`}
         >
             {/* Header / Toggle */}
-            <div style={{
-                padding: isCollapsed ? '0 0 16px 0' : 'var(--spacing-md) 0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: isCollapsed ? 'center' : 'space-between',
-                height: '60px'
-            }}>
+            <div className={`flex items-center h-[60px] ${isCollapsed ? 'justify-center' : 'justify-between py-4'}`}>
                 {!isCollapsed && (
-                    <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                        <h1 style={{ fontSize: '20px', fontWeight: '900', color: 'var(--color-text-base)', margin: 0 }}>Analytics Hub</h1>
-                        <p style={{ fontSize: '10px', color: 'var(--color-text-subdued)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Platform</p>
+                    <div className="overflow-hidden whitespace-nowrap">
+                        <h1 className="text-xl font-black text-white m-0 tracking-tight">Analytical <span className="text-lime-400">Hub</span></h1>
+                        <p className="text-[10px] text-gray-500 uppercase tracking-widest m-0">Platform</p>
                     </div>
                 )}
 
                 <button
                     onClick={toggleCollapse}
-                    className="btn-icon"
-                    style={{
-                        background: 'transparent',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        color: 'var(--color-text-subdued)',
-                        padding: '4px',
-                        minWidth: '24px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        marginLeft: isCollapsed ? 0 : 'auto'
-                    }}
+                    className={`flex items-center justify-center min-w-[24px] p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors ${isCollapsed ? '' : 'ml-auto'}`}
                 >
-                    {isCollapsed ? '➡' : '⬅'}
+                    <span>
+                        <i key={`sidebar-toggle-${isCollapsed}`} data-eva={isCollapsed ? "chevron-right-outline" : "chevron-left-outline"} className="w-4 h-4"></i>
+                    </span>
                 </button>
             </div>
 
             {/* Navigation */}
-            <nav style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--spacing-xs)'
-            }}>
+            <nav className="flex flex-col gap-1">
                 {menuItems.map((item) => {
                     const isActive = location.pathname === item.path;
 
@@ -85,31 +56,20 @@ const Sidebar = ({ user, isCollapsed, toggleCollapse }) => {
                         <Link
                             key={item.path}
                             to={item.path}
-                            style={{ textDecoration: 'none' }}
                             title={isCollapsed ? item.label : ''}
+                            className="no-underline"
                         >
                             <motion.div
-                                whileHover={{ backgroundColor: 'var(--color-bg-highlight)' }}
+                                whileHover={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}
                                 whileTap={{ scale: 0.98 }}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: isCollapsed ? 'center' : 'flex-start',
-                                    gap: 'var(--spacing-md)',
-                                    padding: '12px 16px',
-                                    borderRadius: 'var(--radius-sm)',
-                                    background: isActive ? 'var(--color-bg-highlight)' : 'transparent',
-                                    color: isActive ? 'var(--color-text-base)' : 'var(--color-text-subdued)',
-                                    cursor: 'pointer',
-                                    transition: 'all var(--transition-base)',
-                                    fontWeight: isActive ? 'var(--font-weight-bold)' : 'var(--font-weight-medium)',
-                                    fontSize: 'var(--font-size-base)'
-                                }}
+                                className={`flex items-center gap-4 px-4 py-3 rounded-lg transition-all duration-200 cursor-pointer ${isCollapsed ? 'justify-center px-0' : ''} ${isActive ? 'bg-white/10 text-white font-bold' : 'text-gray-400 hover:text-white font-medium'}`}
                             >
-                                <span style={{ fontSize: '20px' }}>
-                                    {item.icon}
-                                </span>
-                                {!isCollapsed && <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>}
+                                <div className="min-w-[24px] flex items-center justify-center">
+                                    <span>
+                                        <i data-eva={item.icon} className={`w-5 h-5 ${isActive ? 'text-lime-400' : 'text-gray-400'}`}></i>
+                                    </span>
+                                </div>
+                                {!isCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
                             </motion.div>
                         </Link>
                     );
@@ -117,67 +77,36 @@ const Sidebar = ({ user, isCollapsed, toggleCollapse }) => {
             </nav>
 
             {/* Divider */}
-            <div style={{
-                height: '1px',
-                background: 'var(--color-border)',
-                margin: 'var(--spacing-md) 0'
-            }} />
+            <div className="h-px bg-white/10 my-4" />
 
             {/* Library Section */}
             {!isCollapsed && (
-                <div style={{
-                    padding: '12px 16px',
-                    color: 'var(--color-text-subdued)',
-                    fontSize: 'var(--font-size-sm)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    whiteSpace: 'nowrap'
-                }}>
+                <div className="px-4 py-2 text-gray-500 text-xs font-semibold uppercase tracking-widest whitespace-nowrap">
                     Your Library
                 </div>
             )}
 
             {/* User Session Info */}
             {user && (
-                <div style={{
-                    padding: isCollapsed ? '12px' : '12px 16px',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'rgba(255,255,255,0.03)',
-                    marginTop: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: isCollapsed ? 'center' : 'flex-start'
-                }}>
-                    {!isCollapsed && <div style={{ fontSize: '0.75rem', color: 'var(--color-text-subdued)', marginBottom: '8px', whiteSpace: 'nowrap' }}>USER SESSION</div>}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#1db954' }}></div>
-                        {!isCollapsed && <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>Active</span>}
+                <div className={`mt-auto rounded-xl bg-white/5 border border-white/5 flex flex-col ${isCollapsed ? 'p-3 items-center' : 'p-4 items-start'}`}>
+                    {!isCollapsed && <div className="text-xs text-gray-500 mb-2 whitespace-nowrap">USER SESSION</div>}
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-lime-500 shadow-[0_0_8px_rgba(132,204,22,0.6)]"></div>
+                        {!isCollapsed && <span className="text-sm font-medium">Active</span>}
                     </div>
                 </div>
             )}
 
             {/* Tip Card if not logged in */}
             {!user && !isCollapsed && (
-                <div style={{
-                    marginTop: 'auto',
-                    padding: 'var(--spacing-md)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'linear-gradient(135deg, #1db954 0%, #1ed760 100%)',
-                    color: '#000'
-                }}>
-                    <div style={{
-                        fontSize: 'var(--font-size-sm)',
-                        fontWeight: 'var(--font-weight-bold)',
-                        marginBottom: 'var(--spacing-xs)'
-                    }}>
-                        💡 Pro Tip
+                <div className="mt-auto p-4 rounded-xl bg-gradient-to-br from-lime-400 to-lime-500 text-black shadow-lg">
+                    <div className="text-sm font-bold mb-1 flex items-center gap-2">
+                        <span>
+                            <i data-eva="bulb-outline" className="w-4 h-4"></i>
+                        </span>
+                        Pro Tip
                     </div>
-                    <div style={{
-                        fontSize: 'var(--font-size-xs)',
-                        lineHeight: 1.4,
-                        opacity: 0.9
-                    }}>
+                    <div className="text-xs opacity-90 leading-relaxed">
                         Login to access your ACC projects and 3D models.
                     </div>
                 </div>

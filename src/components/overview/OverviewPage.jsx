@@ -12,6 +12,9 @@ const OverviewPage = () => {
     useEffect(() => {
         storageService.createSampleDashboards();
         loadDashboards();
+        if (window.eva) {
+            window.eva.replace({ fill: 'currentColor' });
+        }
     }, []);
 
     const loadDashboards = () => {
@@ -24,56 +27,46 @@ const OverviewPage = () => {
             dashboard.description.toLowerCase().includes(searchQuery.toLowerCase());
     });
 
+    useEffect(() => {
+        if (window.eva) {
+            window.eva.replace({ fill: 'currentColor' });
+        }
+    }, [filteredDashboards]);
+
+
+
     return (
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            style={{ width: '100%', maxWidth: '1800px' }}
+            className="w-full max-w-[1800px] mx-auto"
         >
             {/* Quick Actions */}
-            <div style={{
-                display: 'flex',
-                gap: 'var(--spacing-md)',
-                marginBottom: 'var(--spacing-xl)'
-            }}>
+            <div className="flex gap-4 mb-8">
                 <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => navigate('/dashboard/new')}
-                    className="btn btn-primary"
-                    style={{
-                        padding: '14px 28px',
-                        fontSize: 'var(--font-size-sm)'
-                    }}
+                    className="btn btn-primary py-3 px-8 text-sm shadow-[0_0_15px_rgba(204,246,85,0.3)] hover:shadow-[0_0_25px_rgba(204,246,85,0.5)] transition-shadow flex items-center gap-2"
                 >
-                    ➕ Create Dashboard
+                    <span>
+                        <i data-eva="plus-outline" className="w-4 h-4"></i>
+                    </span>
+                    Create Dashboard
                 </motion.button>
             </div>
 
             {/* Section: Recent Dashboards */}
-            <section style={{ marginBottom: 'var(--spacing-3xl)' }}>
-                <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 'var(--spacing-lg)'
-                }}>
-                    <h2 style={{
-                        fontSize: 'var(--font-size-2xl)',
-                        fontWeight: 'var(--font-weight-bold)',
-                        color: 'var(--color-text-base)'
-                    }}>
+            <section className="mb-16">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-3xl font-bold text-white tracking-tight">
                         Your Dashboards
                     </h2>
                 </div>
 
                 {filteredDashboards.length > 0 ? (
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                        gap: 'var(--spacing-lg)'
-                    }}>
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6">
                         {filteredDashboards.map((dashboard, index) => (
                             <motion.div
                                 key={dashboard.id}
@@ -92,29 +85,17 @@ const OverviewPage = () => {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        style={{
-                            padding: 'var(--spacing-3xl)',
-                            textAlign: 'center',
-                            background: 'var(--color-bg-elevated)',
-                            borderRadius: 'var(--radius-lg)'
-                        }}
+                        className="p-16 text-center bg-white/5 border border-white/10 rounded-3xl backdrop-blur-md flex flex-col items-center justify-center max-w-2xl mx-auto"
                     >
-                        <div style={{ fontSize: '64px', marginBottom: 'var(--spacing-lg)' }}>
-                            📊
+                        <div className="text-7xl mb-6 opacity-30">
+                            <span>
+                                <i data-eva="grid-outline" data-eva-animation="pulse" className="w-16 h-16"></i>
+                            </span>
                         </div>
-                        <h3 style={{
-                            fontSize: 'var(--font-size-2xl)',
-                            fontWeight: 'var(--font-weight-bold)',
-                            marginBottom: 'var(--spacing-sm)',
-                            color: 'var(--color-text-base)'
-                        }}>
+                        <h3 className="text-2xl font-bold mb-2 text-white">
                             {searchQuery ? 'No dashboards found' : 'Create your first dashboard'}
                         </h3>
-                        <p style={{
-                            fontSize: 'var(--font-size-base)',
-                            color: 'var(--color-text-subdued)',
-                            marginBottom: 'var(--spacing-xl)'
-                        }}>
+                        <p className="text-gray-400 mb-8 text-lg">
                             {searchQuery
                                 ? 'Try adjusting your search query'
                                 : 'Get started with analytics and 3D model insights'
@@ -125,9 +106,12 @@ const OverviewPage = () => {
                                 whileHover={{ scale: 1.04 }}
                                 whileTap={{ scale: 0.96 }}
                                 onClick={() => navigate('/dashboard/new')}
-                                className="btn btn-primary"
+                                className="btn btn-primary flex items-center gap-2"
                             >
-                                ➕ Create Dashboard
+                                <span>
+                                    <i data-eva="plus-outline" className="w-4 h-4"></i>
+                                </span>
+                                Create Dashboard
                             </motion.button>
                         )}
                     </motion.div>
@@ -136,27 +120,18 @@ const OverviewPage = () => {
 
             {/* Section: Quick Stats */}
             {dashboards.length > 0 && (
-                <section style={{ marginBottom: 'var(--spacing-3xl)' }}>
-                    <h2 style={{
-                        fontSize: 'var(--font-size-xl)',
-                        fontWeight: 'var(--font-weight-bold)',
-                        color: 'var(--color-text-base)',
-                        marginBottom: 'var(--spacing-lg)'
-                    }}>
+                <section className="mb-16">
+                    <h2 className="text-2xl font-bold text-white mb-6 tracking-tight">
                         Overview
                     </h2>
 
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                        gap: 'var(--spacing-md)'
-                    }}>
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
                         {[
                             {
                                 label: 'Total Dashboards',
                                 value: dashboards.length,
-                                icon: '📊',
-                                color: 'var(--color-primary)'
+                                icon: 'bar-chart-outline',
+                                color: 'text-lime-400'
                             },
                             {
                                 label: 'Updated This Week',
@@ -164,14 +139,14 @@ const OverviewPage = () => {
                                     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                                     return new Date(d.updatedAt) > weekAgo;
                                 }).length,
-                                icon: '🕒',
-                                color: 'var(--color-accent-blue)'
+                                icon: 'clock-outline',
+                                color: 'text-cyan-400'
                             },
                             {
                                 label: 'Total Components',
                                 value: dashboards.reduce((sum, d) => sum + (d.components?.length || 0), 0),
-                                icon: '🧩',
-                                color: 'var(--color-accent-purple)'
+                                icon: 'layers-outline',
+                                color: 'text-purple-400'
                             }
                         ].map((stat, index) => (
                             <motion.div
@@ -179,34 +154,18 @@ const OverviewPage = () => {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.3 + index * 0.1 }}
-                                style={{
-                                    background: 'var(--color-bg-elevated)',
-                                    borderRadius: 'var(--radius-md)',
-                                    padding: 'var(--spacing-lg)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 'var(--spacing-md)'
-                                }}
+                                className="glass-panel p-6 flex items-center gap-6 hover:bg-white/10 transition-colors"
                             >
-                                <div style={{
-                                    fontSize: '32px'
-                                }}>
-                                    {stat.icon}
+                                <div className={`text-4xl ${stat.color} opacity-80`}>
+                                    <span>
+                                        <i data-eva={stat.icon} className="w-10 h-10"></i>
+                                    </span>
                                 </div>
                                 <div>
-                                    <div style={{
-                                        fontSize: 'var(--font-size-3xl)',
-                                        fontWeight: 'var(--font-weight-black)',
-                                        color: stat.color,
-                                        lineHeight: 1
-                                    }}>
+                                    <div className={`text-4xl font-black ${stat.color} leading-none mb-1`}>
                                         {stat.value}
                                     </div>
-                                    <div style={{
-                                        fontSize: 'var(--font-size-sm)',
-                                        color: 'var(--color-text-subdued)',
-                                        marginTop: '4px'
-                                    }}>
+                                    <div className="text-sm text-gray-400 font-medium uppercase tracking-wider">
                                         {stat.label}
                                     </div>
                                 </div>

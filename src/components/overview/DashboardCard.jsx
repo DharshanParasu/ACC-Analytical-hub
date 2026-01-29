@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { storageService } from '../../services/storageService';
+import { useEffect } from 'react';
 
 const DashboardCard = ({ dashboard, onDelete }) => {
     const navigate = useNavigate();
@@ -25,6 +26,12 @@ const DashboardCard = ({ dashboard, onDelete }) => {
             onDelete();
         }
     };
+
+    useEffect(() => {
+        if (window.eva) {
+            window.eva.replace({ fill: 'currentColor' });
+        }
+    }, [dashboard]);
 
     return (
         <motion.div
@@ -90,7 +97,9 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                         color: '#000',
                         boxShadow: 'var(--shadow-lg)'
                     }}>
-                        ▶
+                        <span>
+                            <i data-eva="play-circle-outline" className="w-8 h-8"></i>
+                        </span>
                     </div>
                 </motion.div>
             </div>
@@ -167,7 +176,9 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                     }}
                     title="Edit"
                 >
-                    ✏️
+                    <span>
+                        <i data-eva="edit-2-outline" className="w-4 h-4"></i>
+                    </span>
                 </motion.button>
 
                 <motion.button
@@ -189,7 +200,9 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                     }}
                     title="Delete"
                 >
-                    🗑️
+                    <span>
+                        <i data-eva="trash-2-outline" className="w-4 h-4"></i>
+                    </span>
                 </motion.button>
             </motion.div>
         </motion.div>
