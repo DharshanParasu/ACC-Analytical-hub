@@ -1,5 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+    Building2,
+    HardHat,
+    Folder,
+    FileText,
+    Search,
+    AlertTriangle,
+    X,
+    ChevronRight,
+    Check,
+    FolderOpen,
+    ArrowLeft
+} from 'lucide-react';
 import apsService from '../../services/apsService';
 
 const FileExplorer = ({ onSelect, onClose }) => {
@@ -27,8 +40,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                 data = data.map(hub => ({
                     id: hub.id,
                     name: hub.attributes.name,
-                    type: 'hub',
-                    thumbnail: '🏢'
+                    type: 'hub'
                 }));
             } else if (current.type === 'hub') {
                 data = await apsService.getProjects(current.id);
@@ -36,8 +48,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                     id: proj.id,
                     hubId: current.id,
                     name: proj.attributes.name,
-                    type: 'project',
-                    thumbnail: '🏗️'
+                    type: 'project'
                 }));
             } else if (current.type === 'project') {
                 data = await apsService.getTopFolders(current.hubId, current.id);
@@ -45,8 +56,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                     id: folder.id,
                     projectId: current.id,
                     name: folder.attributes.displayName,
-                    type: 'folder',
-                    thumbnail: '📁'
+                    type: 'folder'
                 }));
             } else if (current.type === 'folder') {
                 data = await apsService.getFolderContents(current.projectId, current.id);
@@ -57,7 +67,6 @@ const FileExplorer = ({ onSelect, onClose }) => {
                         projectId: current.projectId,
                         name: isFolder ? item.attributes.displayName : item.attributes.displayName,
                         type: isFolder ? 'folder' : 'file',
-                        thumbnail: isFolder ? '📁' : '📄',
                         size: !isFolder ? (item.attributes.storageSize ? `${(item.attributes.storageSize / 1024 / 1024).toFixed(2)} MB` : 'N/A') : null,
                         version: !isFolder ? `v${item.attributes.versionNumber || 1}` : null,
                         urn: !isFolder ? (item.relationships?.tip?.data?.id || item.id) : null
@@ -110,7 +119,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
             }
 
             onSelect({
-                project: { name: path[path.length - 1].name, icon: '🏗️' },
+                project: { name: path[path.length - 1].name, type: 'project' },
                 model: item,
                 modelUrn: urn
             });
@@ -163,10 +172,12 @@ const FileExplorer = ({ onSelect, onClose }) => {
                     background: 'rgba(255,255,255,0.03)'
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <span style={{ fontSize: '1.2rem' }}>📂</span>
+                        <FolderOpen className="w-5 h-5 text-[var(--color-primary)]" />
                         <h2 style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>Select Model</h2>
                     </div>
-                    <button onClick={onClose} className="btn-icon">×</button>
+                    <button onClick={onClose} className="btn-icon">
+                        <X className="w-5 h-5" />
+                    </button>
                 </div>
 
                 <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -180,7 +191,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                     }}>
                         <div style={{ padding: '12px', borderBottom: '1px solid var(--color-border)' }}>
                             <div style={{ position: 'relative' }}>
-                                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.8rem' }}>🔍</span>
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
                                 <input
                                     type="text"
                                     placeholder="Search..."
@@ -188,7 +199,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     style={{
                                         width: '100%',
-                                        padding: '6px 10px 6px 30px',
+                                        padding: '6px 10px 6px 34px',
                                         background: 'rgba(255,255,255,0.05)',
                                         border: '1px solid var(--color-border)',
                                         borderRadius: 'var(--radius-sm)',
@@ -245,7 +256,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                                         padding: '24px'
                                     }}
                                 >
-                                    <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>⚠️</div>
+                                    <AlertTriangle className="w-12 h-12 text-[#ff4d4d] mb-4" />
                                     <div style={{ color: '#ff4d4d', fontWeight: '600', marginBottom: '8px', fontSize: '0.9rem' }}>{error}</div>
                                     <button
                                         onClick={fetchCurrentLevel}
@@ -278,8 +289,18 @@ const FileExplorer = ({ onSelect, onClose }) => {
                                                 transition: 'background 0.2s'
                                             }}
                                         >
-                                            <div style={{ fontSize: '1.5rem' }}>
-                                                {item.thumbnail || '📄'}
+                                            <div style={{
+                                                width: '32px',
+                                                height: '32px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                color: 'var(--color-primary)'
+                                            }}>
+                                                {item.type === 'hub' && <Building2 className="w-6 h-6" />}
+                                                {item.type === 'project' && <HardHat className="w-6 h-6" />}
+                                                {item.type === 'folder' && <Folder className="w-6 h-6" />}
+                                                {item.type === 'file' && <FileText className="w-6 h-6" />}
                                             </div>
                                             <div style={{ flex: 1, minWidth: 0 }}>
                                                 <div style={{
@@ -304,7 +325,7 @@ const FileExplorer = ({ onSelect, onClose }) => {
                                                 </div>
                                             </div>
                                             <div style={{ opacity: 0.3 }}>
-                                                {item.type === 'file' ? '✓' : '›'}
+                                                {item.type === 'file' ? <Check className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                                             </div>
                                         </motion.div>
                                     )) : (

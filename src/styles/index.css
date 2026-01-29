@@ -138,24 +138,7 @@ h6 {
 }
 
 /* Eva Icon Global Fix */
-[data-eva],
-[data-eva] path,
-[data-eva] g,
-[data-eva] circle,
-[data-eva] rect {
-  fill: currentColor !important;
-  transition: fill var(--transition-fast);
-}
 
-[data-eva] {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.eva-hover:hover [data-eva] {
-  fill: var(--color-primary) !important;
-}
 
 h1 {
   font-size: var(--font-size-4xl);

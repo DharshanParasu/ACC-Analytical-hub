@@ -544,7 +544,14 @@ class AnalyticsService {
             });
         }
 
-        // 3. Merge and Sort
+        // 3. Get Calculated Columns
+        if (projectData && projectData.calculations) {
+            projectData.calculations.forEach(calc => {
+                if (calc.name) externalProps.add(calc.name);
+            });
+        }
+
+        // 4. Merge and Sort
         const combined = new Set([...modelProps, ...externalProps]);
         return Array.from(combined).sort();
     }
@@ -585,11 +592,11 @@ class AnalyticsService {
      */
     async getAllData(viewer, projectData) {
         return new Promise((resolve) => {
-            if (!viewer || !viewer.model) return resolve([]);
+            if (!viewer || !viewer.model) return resolve({ results: [], sourceStats: {}, error: 'Viewer or Model not ready' });
 
             console.log('[Analytics] Starting Master Data Fetch...');
             const instanceTree = viewer.model.getInstanceTree();
-            if (!instanceTree) return resolve([]);
+            if (!instanceTree) return resolve({ results: [], sourceStats: {}, error: 'Model instance tree not available' });
 
             // 1. Get all Leaf Node DBIDs
             const allDbIds = [];
@@ -599,7 +606,7 @@ class AnalyticsService {
                 }
             }, true);
 
-            if (allDbIds.length === 0) return resolve([]);
+            if (allDbIds.length === 0) return resolve({ results: [], sourceStats: {}, error: 'No elements found in model' });
             console.log(`[Analytics] Found ${allDbIds.length} elements. Fetching properties...`);
 
             // 2. Prepare External Data Indices
@@ -607,7 +614,7 @@ class AnalyticsService {
             const sourceConfigs = [];
 
             if (projectData && projectData.sources) {
-                Object.values(projectData.sources).forEach(source => {
+                Object.entries(projectData.sources).forEach(([key, source]) => {
                     if (source.data && source.mapping && source.mapping.modelKey && source.mapping.fileKey) {
                         const index = new Map();
                         source.data.forEach(row => {
@@ -618,7 +625,8 @@ class AnalyticsService {
                         sourceConfigs.push({
                             modelKey: source.mapping.modelKey,
                             index: index,
-                            config: source
+                            config: source,
+                            sourceKey: key
                         });
                     }
                 });
@@ -705,11 +713,26 @@ class AnalyticsService {
                 }
 
                 console.log(`[Analytics] Master Data Built. ${masterData.length} records.`);
-                resolve(masterData);
+
+                // Collect stats for each source
+                const sourceStats = {};
+                sourceConfigs.forEach(src => {
+                    sourceStats[src.sourceKey] = {
+                        matchCount: src.matchCount || 0,
+                        totalRows: src.index.size,
+                        fileName: src.config.fileName
+                    };
+                });
+
+                resolve({
+                    results: masterData,
+                    sourceStats: sourceStats,
+                    error: null
+                });
 
             }, (err) => {
                 console.error('[Analytics] Failed to fetch bulk properties:', err);
-                resolve([]);
+                resolve({ results: [], sourceStats: {}, error: 'APS Bulk Property Fetch Error: ' + (err?.message || err || 'Unknown error') });
             });
         });
     }
@@ -768,6 +791,55 @@ class AnalyticsService {
         });
 
         return aggregation;
+    }
+
+    /**
+     * Calculates a single KPI value from the master dataset.
+     */
+    calculateKPI(masterData, propertyName, aggregationType = 'count', filters = [], logicalOperator = 'AND') {
+        if (!masterData || !Array.isArray(masterData)) return 0;
+
+        let filtered = masterData;
+        if (filters && filters.length > 0) {
+            filtered = masterData.filter(item => {
+                const conditionResults = filters.map(condition => {
+                    const val = item[condition.attribute] !== undefined ? String(item[condition.attribute]) : 'Undefined';
+                    const target = String(condition.value);
+
+                    switch (condition.operator) {
+                        case 'equals': return val === target;
+                        case 'contains': return val.toLowerCase().includes(target.toLowerCase());
+                        case 'not_equals': return val !== target;
+                        default: return true;
+                    }
+                });
+                return logicalOperator === 'OR' ? conditionResults.some(r => r) : conditionResults.every(r => r);
+            });
+        }
+
+        if (aggregationType === 'sum' && propertyName) {
+            return filtered.reduce((acc, item) => {
+                const val = parseFloat(item[propertyName]);
+                return acc + (isNaN(val) ? 0 : val);
+            }, 0);
+        }
+
+        return filtered.length;
+    }
+
+    /**
+     * Extracts unique values for a property from the master dataset.
+     */
+    getUniqueValuesFromData(masterData, propertyName) {
+        if (!masterData || !Array.isArray(masterData)) return [];
+        const values = new Set();
+        masterData.forEach(item => {
+            const val = item[propertyName];
+            if (val !== undefined && val !== null) {
+                values.add(String(val));
+            }
+        });
+        return Array.from(values).sort();
     }
 
     /**

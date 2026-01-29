@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
 
-const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds }) => {
+const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterData, availableProperties, propertiesLoading }) => {
     const [selectedProperty, setSelectedProperty] = useState('Category');
-    const [availableProperties, setAvailableProperties] = useState([]);
+    const [localProperties, setLocalProperties] = useState([]);
     const [propertyValues, setPropertyValues] = useState([]);
     const [filteredValues, setFilteredValues] = useState([]); // Values filtered by dropdown search
     const [selectedValues, setSelectedValues] = useState([]);
@@ -12,29 +12,45 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [loading, setLoading] = useState(false);
 
+    // Synchronize local properties with props or masterData
     useEffect(() => {
-        if (viewer) {
-            loadProperties();
+        if (availableProperties && availableProperties.length > 0) {
+            setLocalProperties(availableProperties);
+            // Default to Category if available
+            if (availableProperties.includes('Category') && selectedProperty === 'Category') {
+                // Already set
+            } else if (!availableProperties.includes(selectedProperty) && availableProperties.length > 0) {
+                // Keep current if it exists, otherwise don't force change to avoid resetting selection during background updates
+            }
+        } else if (masterData && masterData.length > 0) {
+            const keys = Object.keys(masterData[0]).filter(k => k !== 'dbId' && k !== 'name' && k !== 'id');
+            setLocalProperties(keys.sort());
         }
-    }, [viewer]);
+    }, [availableProperties, masterData]);
 
     useEffect(() => {
-        if (viewer && selectedProperty) {
+        if ((viewer || (masterData && masterData.length > 0)) && selectedProperty) {
             loadValues(selectedProperty);
         }
-    }, [viewer, selectedProperty, scopedDbIds]);
-
-    const loadProperties = async () => {
-        const props = await analyticsService.getModelPropertyNames(viewer);
-        setAvailableProperties(props);
-    };
+    }, [viewer, selectedProperty, scopedDbIds, masterData]);
 
     const loadValues = async (propName) => {
         setLoading(true);
-        const values = await analyticsService.getUniquePropertyValues(viewer, propName, scopedDbIds);
-        setPropertyValues(values);
-        setFilteredValues(values);
-        setLoading(false);
+        try {
+            if (masterData && masterData.length > 0) {
+                const values = analyticsService.getUniqueValuesFromData(masterData, propName);
+                setPropertyValues(values);
+                setFilteredValues(values);
+            } else if (viewer) {
+                const values = await analyticsService.getUniquePropertyValues(viewer, propName, scopedDbIds);
+                setPropertyValues(values);
+                setFilteredValues(values);
+            }
+        } catch (err) {
+            console.error('[PropertyFilter] Failed to load values:', err);
+        } finally {
+            setLoading(false);
+        }
     };
 
     // Filter values when dropdown search changes
@@ -65,23 +81,33 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds }) => {
             return;
         }
 
-        // Aggregate to find IDs for selected values
-        // We can check each value
         const allIds = [];
-        // We construct a filter for EACH value (OR logic)
-        // searchElements usually does AND. We might need multiple calls or update searchElements to support OR.
-        // For now, let's use aggregateByProperty which effectively groups by value.
 
-        const aggregation = await analyticsService.aggregateByProperty(viewer, selectedProperty);
+        if (masterData && masterData.length > 0) {
+            // Find dbIds in masterData that match selected values
+            const valSet = new Set(values.map(v => String(v)));
+            masterData.forEach(item => {
+                const itemVal = item[selectedProperty];
+                if (itemVal !== undefined && itemVal !== null && valSet.has(String(itemVal))) {
+                    allIds.push(item.dbId);
+                }
+            });
+        } else {
+            // Fallback to viewer scan
+            const aggregation = await analyticsService.aggregateByProperty(viewer, selectedProperty);
+            values.forEach(val => {
+                if (aggregation[val]) {
+                    allIds.push(...aggregation[val].dbIds);
+                }
+            });
+        }
 
-        values.forEach(val => {
-            if (aggregation[val]) {
-                allIds.push(...aggregation[val].dbIds);
-            }
-        });
-
-        viewer.isolate(allIds);
-        viewer.fitToView(allIds);
+        if (allIds.length > 0) {
+            viewer.isolate(allIds);
+            viewer.fitToView(allIds);
+        } else {
+            viewer.isolate(0); // Isolate nothing / hide all
+        }
     };
 
     return (
@@ -117,6 +143,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds }) => {
                             setSelectedProperty(e.target.value);
                             setSelectedValues([]);
                         }}
+                        disabled={propertiesLoading}
                         style={{
                             width: '100%',
                             background: 'var(--color-bg-base)',
@@ -124,12 +151,21 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds }) => {
                             borderRadius: '4px',
                             padding: '6px',
                             color: 'white',
-                            fontSize: '12px'
+                            fontSize: '12px',
+                            opacity: propertiesLoading ? 0.6 : 1
                         }}
                     >
-                        {availableProperties.map(p => (
-                            <option key={p} value={p}>{p}</option>
-                        ))}
+                        {propertiesLoading ? (
+                            <option>Scanned model properties...</option>
+                        ) : localProperties.length > 0 ? (
+                            <>
+                                {localProperties.map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                ))}
+                            </>
+                        ) : (
+                            <option>No properties found</option>
+                        )}
                     </select>
                 </div>
             </div>

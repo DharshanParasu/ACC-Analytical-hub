@@ -2,7 +2,70 @@
 const STORAGE_KEY = 'analytical_hub_dashboards';
 
 export const storageService = {
-    // Get all dashboards
+    // --- Projects ---
+    getProjects() {
+        try {
+            const data = localStorage.getItem('analytical_hub_projects');
+            return data ? JSON.parse(data) : [];
+        } catch (error) {
+            console.error('Error loading projects:', error);
+            return [];
+        }
+    },
+
+    getProject(id) {
+        const projects = this.getProjects();
+        return projects.find(p => p.id === id);
+    },
+
+    saveProject(project) {
+        try {
+            const projects = this.getProjects();
+            const existingIndex = projects.findIndex(p => p.id === project.id);
+
+            const updatedProject = {
+                ...project,
+                updatedAt: new Date().toISOString()
+            };
+
+            if (existingIndex >= 0) {
+                projects[existingIndex] = updatedProject;
+            } else {
+                projects.push({
+                    ...updatedProject,
+                    createdAt: new Date().toISOString()
+                });
+            }
+
+            localStorage.setItem('analytical_hub_projects', JSON.stringify(projects));
+            return updatedProject;
+        } catch (error) {
+            console.error('Error saving project:', error);
+            throw error;
+        }
+    },
+
+    deleteProject(id) {
+        try {
+            const projects = this.getProjects();
+            const filtered = projects.filter(p => p.id !== id);
+            localStorage.setItem('analytical_hub_projects', JSON.stringify(filtered));
+
+            // Also delete associated dashboards
+            const dashboards = this.getAllDashboards();
+            const filteredDashboards = dashboards.filter(d => d.projectId !== id);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredDashboards));
+
+            return true;
+        } catch (error) {
+            console.error('Error deleting project:', error);
+            return false;
+        }
+    },
+
+    // --- Dashboards ---
+
+    // Get all dashboards (internal use)
     getAllDashboards() {
         try {
             const data = localStorage.getItem(STORAGE_KEY);
@@ -11,6 +74,12 @@ export const storageService = {
             console.error('Error loading dashboards:', error);
             return [];
         }
+    },
+
+    // Get dashboards for a specific project
+    getDashboardsByProject(projectId) {
+        const dashboards = this.getAllDashboards();
+        return dashboards.filter(d => d.projectId === projectId);
     },
 
     // Get dashboard by ID
@@ -62,9 +131,25 @@ export const storageService = {
 
     // Create sample dashboards (for demo)
     createSampleDashboards() {
+        // Ensure a default project exists for samples
+        const projects = this.getProjects();
+        let sampleProjectId = 'sample-project-1';
+
+        if (!projects.some(p => p.id === sampleProjectId)) {
+            this.saveProject({
+                id: sampleProjectId,
+                name: 'Sample ACC Project',
+                hubId: 'mock-hub',
+                hubName: 'Mock Hub',
+                accProjectId: 'mock-project',
+                thumbnail: '🏗️'
+            });
+        }
+
         const samples = [
             {
                 id: 'sample-1',
+                projectId: sampleProjectId,
                 name: 'Construction Analytics',
                 description: 'Building component analysis from BIM model',
                 components: [
@@ -78,6 +163,7 @@ export const storageService = {
             },
             {
                 id: 'sample-2',
+                projectId: sampleProjectId,
                 name: 'Project Timeline',
                 description: 'Schedule and progress tracking',
                 components: [
@@ -91,6 +177,7 @@ export const storageService = {
             },
             {
                 id: 'sample-3',
+                projectId: sampleProjectId,
                 name: 'Resource Allocation',
                 description: 'Team and equipment utilization',
                 components: [

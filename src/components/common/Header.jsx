@@ -1,16 +1,10 @@
-import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 const Header = ({ user, onLogin }) => {
     const location = useLocation();
-
-    useEffect(() => {
-        if (window.eva) {
-            window.eva.replace({ fill: 'currentColor' });
-        }
-    }, [user, location.pathname]);
 
     const getPageTitle = () => {
         if (location.pathname === '/overview') return 'Home';
@@ -21,9 +15,9 @@ const Header = ({ user, onLogin }) => {
     };
 
     return (
-        <header className="h-16 bg-[#030508]/80 backdrop-blur-md px-8 flex items-center justify-between sticky top-0 z-[1020] border-b border-white/10">
+        <header className="h-16 bg-[var(--color-bg-base)]/80 backdrop-blur-md px-8 flex items-center justify-between sticky top-0 z-[1020] border-b border-[var(--color-border)] transition-colors duration-200">
             <div>
-                <h2 className="text-2xl font-black text-white m-0 tracking-tight">
+                <h2 className="text-2xl font-black text-[var(--color-text-base)] m-0 tracking-tight">
                     {getPageTitle()}
                 </h2>
             </div>
@@ -36,26 +30,24 @@ const Header = ({ user, onLogin }) => {
                     <input
                         type="text"
                         placeholder="Search dashboards..."
-                        className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/5 rounded-full text-white placeholder-gray-500 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all"
+                        className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-full text-[var(--color-text-base)] placeholder-[var(--color-text-muted)] focus:outline-none focus:bg-[var(--color-bg-surface)] focus:border-[var(--color-border-hover)] transition-all"
                     />
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center">
-                        <span>
-                            <i data-eva="search-outline" className="w-5 h-5 text-gray-500 group-focus-within:text-white transition-colors"></i>
-                        </span>
+                        <Search className="w-5 h-5 text-[var(--color-text-muted)] group-focus-within:text-[var(--color-text-base)] transition-colors" />
                     </div>
                 </div>
 
                 {/* User Identity / Login */}
                 {user ? (
-                    <div className="flex items-center gap-3 pl-4 border-l border-white/10">
+                    <div className="flex items-center gap-3 pl-4 border-l border-[var(--color-border)]">
                         <div className="text-right flex flex-col">
-                            <span className="text-sm font-bold text-white leading-tight">{user.userName}</span>
-                            <span className="text-[10px] text-gray-400">{user.emailId}</span>
+                            <span className="text-sm font-bold text-[var(--color-text-base)] leading-tight">{user.userName}</span>
+                            <span className="text-[10px] text-[var(--color-text-muted)]">{user.emailId}</span>
                         </div>
                         <motion.div
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            className="w-9 h-9 rounded-full bg-lime-400 flex items-center justify-center overflow-hidden cursor-pointer border-2 border-white/10 shadow-lg"
+                            className="w-9 h-9 rounded-full bg-lime-400 flex items-center justify-center overflow-hidden cursor-pointer border-2 border-[var(--color-border)] shadow-lg"
                         >
                             {user.profileImages?.sizeX40 ? (
                                 <img src={user.profileImages.sizeX40} alt="profile" className="w-full h-full object-cover" />

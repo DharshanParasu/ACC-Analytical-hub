@@ -5,9 +5,11 @@ import { ThemeProvider } from './context/ThemeContext';
 import Header from './components/common/Header';
 import Sidebar from './components/common/Sidebar';
 import OverviewPage from './components/overview/OverviewPage';
+import ProjectsPage from './components/projects/ProjectsPage';
 import DashboardBuilder from './components/dashboard/DashboardBuilder';
 import DashboardView from './components/dashboard/DashboardView';
 import apsService from './services/apsService';
+import { Zap, LogIn, AlertCircle } from 'lucide-react';
 
 class GlobalErrorBoundary extends Component {
   constructor(props) {
@@ -107,18 +109,14 @@ function App() {
   };
 
   useEffect(() => {
-    if (window.eva) {
-      window.eva.replace({
-        fill: 'currentColor'
-      });
-    }
+    // Eva icons removed
   }, [isAuthenticated, user]);
 
   return (
     <GlobalErrorBoundary>
       <ThemeProvider>
         <Router>
-          <div className="flex min-h-screen bg-[var(--color-bg-base)] text-white transition-colors duration-200">
+          <div className="flex min-h-screen bg-[var(--color-bg-base)] text-[var(--color-text-base)] transition-colors duration-200">
             <Sidebar
               user={user}
               isCollapsed={sidebarCollapsed}
@@ -136,7 +134,7 @@ function App() {
                     <div className="w-24 h-24 mb-8 rounded-3xl bg-gradient-to-br from-lime-400 to-cyan-400 flex items-center justify-center shadow-[0_0_40px_rgba(204,246,85,0.3)] animate-scale-in">
                       <span className="text-4xl text-black/80 flex items-center justify-center w-full h-full">
                         <span>
-                          <i data-eva="flash" className="w-12 h-12"></i>
+                          <Zap className="w-12 h-12" />
                         </span>
                       </span>
                     </div>
@@ -164,7 +162,7 @@ function App() {
                           className="btn btn-primary w-full py-4 text-lg shadow-[0_0_20px_rgba(204,246,85,0.2)] hover:shadow-[0_0_35px_rgba(204,246,85,0.5)] flex items-center justify-center gap-3"
                         >
                           <span>
-                            <i data-eva="log-in" className="w-5 h-5"></i>
+                            <LogIn className="w-5 h-5 text-black" />
                           </span>
                           Login with Autodesk
                         </button>
@@ -195,7 +193,7 @@ function App() {
                         </div>
                         <p className="mt-3 text-xs text-gray-500 flex items-center gap-1">
                           <span>
-                            <i data-eva="alert-circle-outline" className="w-3 h-3"></i>
+                            <AlertCircle className="w-3 h-3" />
                           </span>
                           Direct tokens expire in 60 minutes
                         </p>
@@ -204,8 +202,15 @@ function App() {
                   </div>
                 ) : (
                   <Routes>
-                    <Route path="/" element={<Navigate to="/overview" replace />} />
-                    <Route path="/overview" element={<OverviewPage />} />
+                    <Route path="/" element={<Navigate to="/projects" replace />} />
+                    <Route path="/projects" element={<ProjectsPage />} />
+                    <Route path="/project/:projectId" element={<OverviewPage />} />
+                    <Route path="/project/:projectId/dashboard/new" element={<DashboardBuilder />} />
+                    <Route path="/project/:projectId/dashboard/edit/:id" element={<DashboardBuilder />} />
+                    <Route path="/project/:projectId/dashboard/view/:id" element={<DashboardView />} />
+
+                    {/* Legacy Routes */}
+                    <Route path="/overview" element={<Navigate to="/projects" replace />} />
                     <Route path="/dashboard/new" element={<DashboardBuilder />} />
                     <Route path="/dashboard/edit/:id" element={<DashboardBuilder />} />
                     <Route path="/dashboard/view/:id" element={<DashboardView />} />
