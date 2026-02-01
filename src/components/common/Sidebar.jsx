@@ -7,10 +7,11 @@ import {
     LayoutGrid,
     ChevronLeft,
     ChevronRight,
-    Lightbulb
+    Lightbulb,
+    Settings
 } from 'lucide-react';
 
-const Sidebar = ({ user, isCollapsed, toggleCollapse }) => {
+const Sidebar = ({ user, isCollapsed, toggleCollapse, onConfigure }) => {
     const location = useLocation();
 
     const match = location.pathname.match(/^\/project\/([^/]+)/);
@@ -99,9 +100,11 @@ const Sidebar = ({ user, isCollapsed, toggleCollapse }) => {
                 </div>
             )}
 
+            {/* Settings Link (Bottom) */}
+
             {/* User Session Info */}
             {user && (
-                <div className={`mt-auto rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border)] flex flex-col ${isCollapsed ? 'p-3 items-center' : 'p-4 items-start'}`}>
+                <div className={`rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border)] flex flex-col mx-2 mb-4 ${isCollapsed ? 'p-3 items-center' : 'p-4 items-start'}`}>
                     {!isCollapsed && <div className="text-xs text-[var(--color-text-muted)] mb-2 whitespace-nowrap">USER SESSION</div>}
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-lime-500 shadow-[0_0_8px_rgba(132,204,22,0.6)]"></div>

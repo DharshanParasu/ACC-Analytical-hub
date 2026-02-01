@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
 
-const KPICard = ({ config = {}, masterData }) => {
+const KPICard = ({ config = {}, masterData, timelineDate, globalSync, scopedDbIds }) => {
     const {
         title = 'KPI Metric',
         unit = '',
@@ -17,32 +17,58 @@ const KPICard = ({ config = {}, masterData }) => {
     } = config;
 
     const [displayValue, setDisplayValue] = useState(config.value || '0');
+    const [displayUnit, setDisplayUnit] = useState(config.unit || '');
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (masterData && (attribute || aggregationType === 'count')) {
             calculateMetric();
         }
-    }, [masterData, attribute, aggregationType, JSON.stringify(filters), logicalOperator]);
+    }, [masterData, attribute, aggregationType, JSON.stringify(filters), logicalOperator, timelineDate, globalSync, config.timelineDateAttribute, JSON.stringify(scopedDbIds)]);
 
     const calculateMetric = () => {
         setLoading(true);
         try {
-            const val = analyticsService.calculateKPI(masterData, attribute, aggregationType, filters, logicalOperator);
+            let targetData = masterData;
 
-            // Format number if large
-            let formattedVal = val;
-            if (typeof val === 'number') {
-                if (val >= 1000000) {
-                    formattedVal = (val / 1000000).toFixed(1) + 'M';
-                } else if (val >= 1000) {
-                    formattedVal = (val / 1000).toFixed(1) + 'K';
-                } else {
-                    formattedVal = Math.round(val * 100) / 100;
-                }
+            // --- TIMELINE SYNC FILTER ---
+            if (globalSync && timelineDate) {
+                const dateAttr = config.timelineDateAttribute || 'Start Date'; // Fallback
+                targetData = masterData.filter(row => {
+                    const val = row[dateAttr];
+                    if (!val) return false;
+                    const rowDate = new Date(val);
+                    return !isNaN(rowDate.getTime()) && rowDate <= timelineDate;
+                });
             }
 
-            setDisplayValue(String(formattedVal));
+            // --- GLOBAL SYNC (CROSS-FILTER) ---
+            if (globalSync && scopedDbIds && scopedDbIds.length > 0) {
+                const scopeSet = new Set(scopedDbIds);
+                targetData = targetData.filter(row => scopeSet.has(row.dbId));
+            }
+
+            const { value, unit: detectedUnit } = analyticsService.calculateKPI(targetData, attribute, aggregationType, filters, logicalOperator);
+
+            // Use exact mode by default (2 decimal rounding) as per user request
+            const isExact = config.exact !== undefined ? config.exact : true;
+
+            // Format number ONLY using centralized helper
+            const formattedVal = analyticsService.formatValue(value, {
+                exact: isExact,
+                decimals: 2,
+                unit: '' // Handle unit separately in JSX
+            });
+
+            setDisplayValue(formattedVal);
+            // Save detected unit if we don't have a manual one
+            if (detectedUnit && !config.unit) {
+                // We can't easily update config, but we can store it in state if needed.
+                // However, let's just use it in the JSX.
+                setDisplayUnit(detectedUnit);
+            } else {
+                setDisplayUnit(config.unit || ''); // Use config.unit if provided, otherwise empty
+            }
         } catch (err) {
             console.error('[KPICard] Calculation error:', err);
         } finally {
@@ -86,16 +112,6 @@ const KPICard = ({ config = {}, masterData }) => {
                 border: loading ? '1px solid var(--color-primary)' : '1px solid transparent'
             }}
         >
-            {/* Background icon */}
-            <div style={{
-                position: 'absolute',
-                top: -10,
-                right: -10,
-                fontSize: '80px',
-                opacity: 0.05
-            }}>
-                {icon}
-            </div>
 
             <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div style={{
@@ -128,14 +144,14 @@ const KPICard = ({ config = {}, masterData }) => {
                     >
                         {loading ? '...' : displayValue}
                     </div>
-                    {unit && !loading && (
+                    {displayUnit && !loading && (
                         <div style={{
                             fontSize: 'var(--font-size-lg)',
                             color: 'var(--color-text-subdued)',
                             fontWeight: 'var(--font-weight-medium)',
                             marginTop: '4px'
                         }}>
-                            {unit}
+                            {displayUnit}
                         </div>
                     )}
                 </div>

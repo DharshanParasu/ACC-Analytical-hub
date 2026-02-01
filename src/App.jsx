@@ -9,7 +9,8 @@ import ProjectsPage from './components/projects/ProjectsPage';
 import DashboardBuilder from './components/dashboard/DashboardBuilder';
 import DashboardView from './components/dashboard/DashboardView';
 import apsService from './services/apsService';
-import { Zap, LogIn, AlertCircle } from 'lucide-react';
+import ApsConfigModal from './components/common/ApsConfigModal';
+import { Zap, LogIn, AlertCircle, Settings } from 'lucide-react';
 
 class GlobalErrorBoundary extends Component {
   constructor(props) {
@@ -53,6 +54,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarWidth = sidebarCollapsed ? '64px' : '240px';
   const [directToken, setDirectToken] = useState('');
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -121,12 +123,15 @@ function App() {
               user={user}
               isCollapsed={sidebarCollapsed}
               toggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onConfigure={() => setIsConfigOpen(true)}
             />
 
             <div className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-              <Header user={user} onLogin={() => apsService.login()} />
+              <Header user={user} onLogin={() => apsService.login()} onConfigure={() => setIsConfigOpen(true)} />
 
-              <main className="flex-1 p-8 overflow-auto bg-[var(--color-bg-base)] relative">
+              <ApsConfigModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} />
+
+              <main className="flex-1 overflow-auto bg-[var(--color-bg-base)] relative">
                 {!isAuthenticated ? (
                   <div className="flex flex-col items-center justify-center min-h-[80vh] text-center max-w-2xl mx-auto animate-fade-in relative z-10">
 
@@ -184,6 +189,14 @@ function App() {
                             onChange={(e) => setDirectToken(e.target.value)}
                             className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-cyan-400 focus:bg-black/60 transition-all"
                           />
+                          <button
+                            type="button"
+                            onClick={() => setIsConfigOpen(true)}
+                            className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[var(--color-text-muted)] transition-colors"
+                            title="Configure APS Credentials"
+                          >
+                            <Settings className="w-5 h-5" />
+                          </button>
                           <button
                             type="submit"
                             className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-white font-medium transition-all hover:scale-105 active:scale-95"

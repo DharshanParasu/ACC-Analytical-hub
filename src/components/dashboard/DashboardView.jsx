@@ -16,7 +16,7 @@ import ScheduleVisual from '../charts/ScheduleVisual';
 import exportUtils from '../../utils/exportUtils';
 import { analyticsService } from '../../services/analyticsService';
 import apsService from '../../services/apsService';
-import { RefreshCw, Zap, FileText, Edit2, LogOut, Loader2, Maximize2, Minimize2 } from 'lucide-react';
+import { RefreshCw, Zap, FileText, Edit2, LogOut, Loader2, Maximize2, Minimize2, MessageSquare, X } from 'lucide-react';
 
 const componentTypes = [
     { type: 'viewer', component: APSViewer },
@@ -26,8 +26,7 @@ const componentTypes = [
     { type: 'line', component: LineChart },
     { type: 'kpi', component: KPICard },
     { type: 'table', component: DataTable },
-    { type: 'schedule', component: ScheduleVisual },
-    { type: 'chatbot', component: AIChatBot }
+    { type: 'schedule', component: ScheduleVisual }
 ];
 
 class ErrorBoundary extends React.Component {
@@ -71,15 +70,18 @@ const DashboardView = () => {
     const [modelLoaded, setModelLoaded] = useState(false);
     const [globalModel, setGlobalModel] = useState(null);
 
-    // Interaction Sync State - Default to true for consumers
+    // Unified Sync State
     const [currentSelection, setCurrentSelection] = useState([]);
-    const [interactionSync, setInteractionSync] = useState(true);
+    const [masterData, setMasterData] = useState([]);
+    const [globalSync, setGlobalSync] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [timelineDate, setTimelineDate] = useState(null);
     const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isAIChatOpen, setIsAIChatOpen] = useState(false);
 
     useEffect(() => {
         // EVA icons removed
-    }, [dashboard, isRefreshing, interactionSync]);
+    }, [dashboard, isRefreshing, globalSync]);
 
     useEffect(() => {
         try {
@@ -108,8 +110,7 @@ const DashboardView = () => {
 
 
 
-    // Unified Data State (Master Data)
-    const [masterData, setMasterData] = useState([]);
+    // Unified Data State
     const [availableProperties, setAvailableProperties] = useState([]);
     const [propertiesLoading, setPropertiesLoading] = useState(false);
 
@@ -182,8 +183,8 @@ const DashboardView = () => {
         // Listen for selection changes
         try {
             viewerInstance.addEventListener(window.Autodesk.Viewing.SELECTION_CHANGED_EVENT, (event) => {
-                // Check current sync state from ref or state (ensure closure freshness)
-                if (!interactionSync) return;
+                // Check current sync state
+                if (!globalSync) return;
                 const selection = viewerInstance.getSelection();
                 setCurrentSelection(selection);
             });
@@ -243,6 +244,13 @@ const DashboardView = () => {
 
     const fetchProperties = async (viewerInstance) => {
         if (!viewerInstance || !dashboard?.projectData) return;
+
+        // Pre-populate from masterData if available for instant UI
+        if (masterData && masterData.length > 0) {
+            const keys = Object.keys(masterData[0]).filter(k => k !== 'dbId' && k !== 'name' && k !== 'id');
+            setAvailableProperties(keys.sort());
+        }
+
         setPropertiesLoading(true);
         try {
             const props = await analyticsService.getUnifiedPropertyNames(viewerInstance, dashboard.projectData);
@@ -279,10 +287,13 @@ const DashboardView = () => {
                     viewer={modelLoaded ? viewer : null}
                     onDataClick={handleFilterClicked}
                     onThematicColorChange={handleThematicColorChange}
-                    scopedDbIds={interactionSync && currentSelection.length > 0 ? currentSelection : null}
+                    scopedDbIds={globalSync && currentSelection.length > 0 ? currentSelection : null}
+                    globalSync={globalSync}
                     masterData={masterData}
                     availableProperties={availableProperties}
                     propertiesLoading={propertiesLoading}
+                    timelineDate={timelineDate}
+                    onTimelineDateChange={setTimelineDate}
                 />
             </div>
         );
@@ -310,7 +321,7 @@ const DashboardView = () => {
                         if (source.fileUrn && source.type === 'excel') {
                             try {
                                 const arrayBuffer = await apsService.getFileContent(source.fileUrn, token);
-                                const workbook = window.XLSX.read(arrayBuffer, { type: 'array' });
+                                const workbook = window.XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
                                 const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
                                 newSources[key] = { ...source, data: jsonData, lastUpdated: new Date().toISOString() };
                             } catch (e) { console.error('Refesh error', e); }
@@ -325,10 +336,76 @@ const DashboardView = () => {
                 // Update local dashboard state to keep it in sync
                 setDashboard(prev => ({ ...prev, projectData: updatedProjectData }));
 
-                const allData = await analyticsService.getAllData(targetViewer, updatedProjectData);
+                // Prepare Property List for Fetching
+                let modelPropsToFetch = null;
+                if (updatedProjectData.schemaConfig && updatedProjectData.schemaConfig.properties) {
+                    modelPropsToFetch = Object.values(updatedProjectData.schemaConfig.properties)
+                        .filter(p => p.source === 'model' && p.include)
+                        .map(p => p.originalName);
+
+                    Object.values(updatedProjectData.sources).forEach(src => {
+                        if (src.mapping?.modelKey) modelPropsToFetch.push(src.mapping.modelKey);
+                    });
+                    modelPropsToFetch = [...new Set(modelPropsToFetch)];
+                }
+
+                const allData = await analyticsService.getAllData(targetViewer, updatedProjectData, modelPropsToFetch);
+
                 if (allData && allData.results) {
-                    setMasterData(allData.results);
-                    console.log('[DashboardView] Master Data Processed:', allData.results.length);
+                    let results = allData.results || [];
+
+                    // Apply Schema Transformations
+                    if (updatedProjectData.schemaConfig && updatedProjectData.schemaConfig.properties) {
+                        const schemaProps = Object.values(updatedProjectData.schemaConfig.properties).filter(p => p.include);
+
+                        results = results.map(row => {
+                            const newRow = { dbId: row.dbId, name: row.name };
+
+                            schemaProps.forEach(prop => {
+                                const val = row[prop.originalName];
+                                const finalKey = prop.alias || prop.originalName;
+
+                                // Collision Prevention
+                                if (newRow[finalKey] !== undefined && (val === undefined || val === null || val === '')) {
+                                    return;
+                                }
+
+                                // Type Conversion
+                                let finalVal = val;
+                                if (val !== undefined && val !== null && val !== '') {
+                                    if (prop.type === 'number') {
+                                        const num = parseFloat(val);
+                                        finalVal = isNaN(num) ? 0 : num;
+                                    } else if (prop.type === 'date') {
+                                        if (val instanceof Date) {
+                                            finalVal = val;
+                                        } else if (typeof val === 'number' && val > 30000) {
+                                            finalVal = new Date(Math.round((val - 25569) * 86400 * 1000));
+                                        } else {
+                                            const date = new Date(val);
+                                            finalVal = isNaN(date.getTime()) ? val : date;
+                                        }
+
+                                        if (finalVal instanceof Date && finalVal.getFullYear() <= 1970 && val !== 0 && val !== '0') {
+                                            finalVal = val;
+                                        }
+                                    } else if (prop.type === 'boolean') {
+                                        const strVal = String(val).toLowerCase();
+                                        finalVal = strVal === 'true' || strVal === '1' || strVal === 'yes';
+                                    } else {
+                                        finalVal = String(val);
+                                    }
+                                } else {
+                                    finalVal = null;
+                                }
+                                newRow[finalKey] = finalVal;
+                            });
+                            return newRow;
+                        });
+                    }
+
+                    setMasterData(results);
+                    console.log('[DashboardView] Master Data Processed:', results.length);
                 }
 
                 // Refresh property list for UI
@@ -374,7 +451,7 @@ const DashboardView = () => {
                 ref={containerRef}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="w-full min-h-screen flex flex-col bg-[var(--color-bg-base)]"
+                className="w-full min-h-screen flex flex-col bg-[var(--color-bg-base)] p-8"
                 style={{ overflowY: 'auto' }}
             >
                 {/* Header */}
@@ -386,14 +463,10 @@ const DashboardView = () => {
                     <div className="flex gap-3 items-center">
                         <button
                             onClick={toggleFullScreen}
-                            className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-base)] rounded-full font-medium hover:bg-[var(--color-hover)] transition-colors flex items-center gap-2 px-3 py-2 text-sm"
-                            title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+                            className="p-2.5 bg-white/5 hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white rounded-xl transition-all"
+                            title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
                         >
-                            {isFullScreen ? (
-                                <Minimize2 className="w-4 h-4" />
-                            ) : (
-                                <Maximize2 className="w-4 h-4" />
-                            )}
+                            {isFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
                         </button>
                         <button
                             onClick={refreshData}
@@ -410,22 +483,38 @@ const DashboardView = () => {
                             {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
                         </button>
 
+                        <button
+                            onClick={() => {
+                                setCurrentSelection([]);
+                                setTimelineDate(null); // Stop 4D Timeline
+                                if (viewer) {
+                                    viewer.clearSelection();
+                                    viewer.showAll();
+                                }
+                            }}
+                            className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-red-400 rounded-full font-medium hover:bg-red-400/5 transition-all flex items-center gap-2 px-4 py-2 text-xs"
+                            title="Clear all filters and selections"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                            CLEAR
+                        </button>
+
                         {viewer && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-bg-elevated)] rounded-full border border-[var(--color-border)]">
-                                <label className={`text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 ${interactionSync ? 'text-lime-400' : 'text-[var(--color-text-muted)]'}`}>
+                                <label className={`text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 ${globalSync ? 'text-lime-400' : 'text-[var(--color-text-muted)]'}`}>
                                     <span>
-                                        <Zap className={`w-3.5 h-3.5 ${interactionSync ? 'text-lime-400' : 'text-[var(--color-text-muted)]'}`} />
+                                        <Zap className={`w-3.5 h-3.5 ${globalSync ? 'text-lime-400' : 'text-[var(--color-text-muted)]'}`} />
                                     </span>
                                     SYNC
                                 </label>
                                 <div
                                     onClick={() => {
-                                        setInteractionSync(!interactionSync);
-                                        if (interactionSync) setCurrentSelection([]);
+                                        setGlobalSync(!globalSync);
+                                        if (globalSync) setCurrentSelection([]);
                                     }}
-                                    className={`w-8 h-4.5 rounded-full relative cursor-pointer transition-colors ${interactionSync ? 'bg-lime-500' : 'bg-[var(--color-bg-surface)]'}`}
+                                    className={`w-8 h-[18px] rounded-full relative cursor-pointer transition-colors border border-[var(--color-border)] flex-shrink-0 ${globalSync ? 'bg-lime-500' : 'bg-[var(--color-bg-base)]'}`}
                                 >
-                                    <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all ${interactionSync ? 'left-4' : 'left-0.5'}`} />
+                                    <div className={`w-[14px] h-[14px] bg-white rounded-full absolute top-[1px] transition-all ${globalSync ? 'left-[15px]' : 'left-[1px]'}`} />
                                 </div>
                             </div>
                         )}
@@ -471,6 +560,45 @@ const DashboardView = () => {
                         ))}
                     </GridLayout>
                 </div>
+                {/* Floating AI Chat */}
+                <AnimatePresence>
+                    {isAIChatOpen ? (
+                        <AIChatBot
+                            isOpen={isAIChatOpen}
+                            onClose={() => setIsAIChatOpen(false)}
+                            viewer={viewer}
+                            onDataClick={(ids) => setCurrentSelection(ids)}
+                        />
+                    ) : (
+                        <motion.button
+                            initial={{ scale: 0, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={() => setIsAIChatOpen(true)}
+                            style={{
+                                position: 'fixed',
+                                bottom: '24px',
+                                right: '24px',
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '28px',
+                                background: 'var(--color-primary)',
+                                color: '#000',
+                                border: 'none',
+                                boxShadow: '0 8px 32px rgba(29, 185, 84, 0.4)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 9999,
+                                cursor: 'pointer'
+                            }}
+                            title="AI Assistant"
+                        >
+                            <MessageSquare className="w-6 h-6" />
+                        </motion.button>
+                    )}
+                </AnimatePresence>
             </motion.div>
         </ErrorBoundary>
     );

@@ -17,6 +17,8 @@
   --color-text-base: #ffffff;
   --color-text-muted: #9ca3af;
   /* gray-400 */
+  --color-text-subdued: #6b7280;
+  /* gray-500 */
   --color-border: rgba(255, 255, 255, 0.1);
   --color-border-hover: rgba(255, 255, 255, 0.2);
   --color-hover: rgba(255, 255, 255, 0.05);
@@ -24,28 +26,44 @@
   /* lime-500 */
   --color-primary-hover: #a3e635;
   /* lime-400 */
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
+
+  /* Chart Specific Colors - Dark */
+  --chart-grid: #282828;
+  --chart-ticks: #b3b3b3;
+  --chart-tooltip-bg: #181818;
+  --chart-tooltip-border: #282828;
+  --chart-tooltip-text: #ffffff;
 
   color-scheme: dark;
 }
 
 [data-theme="light"] {
-  --color-bg-base: #f8fafc;
-  /* slate-50 */
+  --color-bg-base: #f1f5f9;
+  /* slate-100 */
   --color-bg-elevated: #ffffff;
   --color-bg-surface: #ffffff;
   --color-text-base: #0f172a;
   /* slate-900 */
-  --color-text-muted: #64748b;
+  --color-text-muted: #475569;
+  /* slate-600 - DARKER for contrast */
+  --color-text-subdued: #64748b;
   /* slate-500 */
-  --color-border: rgba(0, 0, 0, 0.1);
-  --color-border-hover: rgba(0, 0, 0, 0.2);
-  --color-hover: rgba(0, 0, 0, 0.05);
+  --color-border: rgba(0, 0, 0, 0.15);
+  --color-border-hover: rgba(0, 0, 0, 0.25);
+  --color-hover: rgba(0, 0, 0, 0.04);
   --color-primary: #65a30d;
   /* lime-600 */
   --color-primary-hover: #4d7c0f;
   /* lime-700 */
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+  /* Chart Specific Colors - Light */
+  --chart-grid: #e2e8f0;
+  --chart-ticks: #64748b;
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-border: #cbd5e1;
+  --chart-tooltip-text: #0f172a;
 
   color-scheme: light;
 }

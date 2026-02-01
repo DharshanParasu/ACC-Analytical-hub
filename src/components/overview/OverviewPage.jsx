@@ -49,7 +49,7 @@ const OverviewPage = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="w-full max-w-[1800px] mx-auto"
+            className="w-full max-w-[1800px] mx-auto p-8"
         >
             {/* Header Section */}
             <div className="flex justify-between items-end mb-8 border-b border-[var(--color-border)] pb-6">

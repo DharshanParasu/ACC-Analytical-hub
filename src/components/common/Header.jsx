@@ -1,9 +1,9 @@
 import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
-const Header = ({ user, onLogin }) => {
+const Header = ({ user, onLogin, onConfigure }) => {
     const location = useLocation();
 
     const getPageTitle = () => {
@@ -23,6 +23,13 @@ const Header = ({ user, onLogin }) => {
             </div>
 
             <div className="flex items-center gap-4">
+                <button
+                    onClick={onConfigure}
+                    className="p-2 rounded-full hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors"
+                    title="Settings"
+                >
+                    <Settings className="w-5 h-5" />
+                </button>
                 <ThemeToggle />
 
                 {/* Search Bar */}

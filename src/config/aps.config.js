@@ -1,22 +1,23 @@
 // Autodesk Platform Services Configuration
 // Get your credentials from: https://aps.autodesk.com/
 
-export const apsConfig = {
-    // Your APS Client ID
-    clientId: import.meta.env.VITE_APS_CLIENT_ID || 'YOUR_CLIENT_ID_HERE',
+// Helper to get config with overrides
+const getStoredConfig = () => {
+    const customId = localStorage.getItem('custom_aps_client_id');
+    const customSecret = localStorage.getItem('custom_aps_client_secret');
+    const customCallback = localStorage.getItem('custom_aps_callback_url');
 
-    // Your APS Client Secret (keep this secure!)
-    clientSecret: import.meta.env.VITE_APS_CLIENT_SECRET || 'YOUR_CLIENT_SECRET_HERE',
-
-    // Callback URL for OAuth
-    callbackUrl: import.meta.env.VITE_APS_REDIRECT_URL || 'https://localhost:8080/',
-
-    // Scopes required for viewing models
-    scopes: ['data:read', 'viewables:read'],
-
-    // Environment
-    environment: 'AutodeskProduction'
+    return {
+        // Prioritize local storage, then env, then placeholder
+        clientId: customId || import.meta.env.VITE_APS_CLIENT_ID || 'YOUR_CLIENT_ID_HERE',
+        clientSecret: customSecret || import.meta.env.VITE_APS_CLIENT_SECRET || 'YOUR_CLIENT_SECRET_HERE',
+        callbackUrl: customCallback || import.meta.env.VITE_APS_REDIRECT_URL || `${window.location.origin}/api/auth/callback`,
+        scopes: ['data:read', 'viewables:read'],
+        environment: 'AutodeskProduction'
+    };
 };
+
+export const apsConfig = getStoredConfig();
 
 // Example model URNs (replace with your actual model URNs from ACC)
 export const sampleModels = {

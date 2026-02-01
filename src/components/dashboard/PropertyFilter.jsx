@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
 
-const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterData, availableProperties, propertiesLoading }) => {
+const PropertyFilter = ({ config, viewer, onDataClick, scopedDbIds, masterData, availableProperties, propertiesLoading, globalSync }) => {
     const [selectedProperty, setSelectedProperty] = useState('Category');
-    const [localProperties, setLocalProperties] = useState([]);
     const [propertyValues, setPropertyValues] = useState([]);
     const [filteredValues, setFilteredValues] = useState([]); // Values filtered by dropdown search
     const [selectedValues, setSelectedValues] = useState([]);
@@ -12,27 +11,28 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
     const [isExpanded, setIsExpanded] = useState(false);
     const [loading, setLoading] = useState(false);
 
-    // Synchronize local properties with props or masterData
-    useEffect(() => {
-        if (availableProperties && availableProperties.length > 0) {
-            setLocalProperties(availableProperties);
-            // Default to Category if available
-            if (availableProperties.includes('Category') && selectedProperty === 'Category') {
-                // Already set
-            } else if (!availableProperties.includes(selectedProperty) && availableProperties.length > 0) {
-                // Keep current if it exists, otherwise don't force change to avoid resetting selection during background updates
-            }
-        } else if (masterData && masterData.length > 0) {
+    // Derived property list - prioritized from masterData for speed/consistency
+    const localProperties = useMemo(() => {
+        if (masterData && masterData.length > 0) {
+            // Extract all keys from masterData sample to get joined properties
             const keys = Object.keys(masterData[0]).filter(k => k !== 'dbId' && k !== 'name' && k !== 'id');
-            setLocalProperties(keys.sort());
+            return keys.sort();
         }
-    }, [availableProperties, masterData]);
+        return availableProperties || [];
+    }, [masterData, availableProperties]);
 
     useEffect(() => {
         if ((viewer || (masterData && masterData.length > 0)) && selectedProperty) {
             loadValues(selectedProperty);
         }
-    }, [viewer, selectedProperty, scopedDbIds, masterData]);
+    }, [viewer, selectedProperty, masterData]);
+
+    // Reset local selection if global selection is cleared (e.g. from Header button)
+    useEffect(() => {
+        if (globalSync && (!scopedDbIds || scopedDbIds.length === 0)) {
+            setSelectedValues([]);
+        }
+    }, [scopedDbIds, globalSync]);
 
     const loadValues = async (propName) => {
         setLoading(true);
@@ -105,8 +105,10 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
         if (allIds.length > 0) {
             viewer.isolate(allIds);
             viewer.fitToView(allIds);
+            if (globalSync && onDataClick) onDataClick(allIds);
         } else {
             viewer.isolate(0); // Isolate nothing / hide all
+            if (globalSync && onDataClick) onDataClick([]);
         }
     };
 
@@ -127,7 +129,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
             <div style={{
                 padding: 'var(--spacing-md)',
                 borderBottom: '1px solid var(--color-border)',
-                background: 'rgba(255,255,255,0.02)'
+                background: 'var(--color-hover)'
             }}>
                 <h3 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>
                     🔍 Model Filter
@@ -150,12 +152,12 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
                             border: '1px solid var(--color-border)',
                             borderRadius: '4px',
                             padding: '6px',
-                            color: 'white',
+                            color: 'var(--color-text-base)',
                             fontSize: '12px',
                             opacity: propertiesLoading ? 0.6 : 1
                         }}
                     >
-                        {propertiesLoading ? (
+                        {(propertiesLoading && localProperties.length === 0) ? (
                             <option>Scanned model properties...</option>
                         ) : localProperties.length > 0 ? (
                             <>
@@ -181,7 +183,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
                             border: '1px solid var(--color-border)',
                             borderRadius: '4px',
                             padding: '8px',
-                            color: 'white',
+                            color: 'var(--color-text-base)',
                             fontSize: '12px',
                             textAlign: 'left',
                             display: 'flex',
@@ -235,7 +237,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
                                             border: '1px solid var(--color-border)',
                                             borderRadius: '3px',
                                             padding: '6px',
-                                            color: 'white',
+                                            color: 'var(--color-text-base)',
                                             fontSize: '11px'
                                         }}
                                     />
@@ -243,7 +245,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
 
                                 <div style={{ overflowY: 'auto', maxHeight: '200px' }}>
                                     {loading ? (
-                                        <div style={{ textAlign: 'center', padding: '12px', color: 'gray', fontSize: '11px' }}>Loading...</div>
+                                        <div style={{ textAlign: 'center', padding: '12px', color: 'var(--color-text-muted)', fontSize: '11px' }}>Loading...</div>
                                     ) : (
                                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                                             {filteredValues.map(val => (
@@ -254,8 +256,8 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
                                                     padding: '8px',
                                                     cursor: 'pointer',
                                                     fontSize: '12px',
-                                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                                    background: selectedValues.includes(val) ? 'rgba(29, 185, 84, 0.1)' : 'transparent',
+                                                    borderBottom: '1px solid var(--color-border)',
+                                                    background: selectedValues.includes(val) ? 'var(--color-primary-faded, rgba(29, 185, 84, 0.1))' : 'transparent',
                                                 }}>
                                                     <input
                                                         type="checkbox"
@@ -268,7 +270,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
                                                 </label>
                                             ))}
                                             {propertyValues.length === 0 && (
-                                                <div style={{ textAlign: 'center', padding: '12px', color: 'gray', fontSize: '11px' }}>
+                                                <div style={{ textAlign: 'center', padding: '12px', color: 'var(--color-text-muted)', fontSize: '11px' }}>
                                                     No values found
                                                 </div>
                                             )}
@@ -296,6 +298,7 @@ const PropertyFilter = ({ config, viewer, onFilterChange, scopedDbIds, masterDat
                                 setSelectedValues([]);
                                 viewer.clearSelection();
                                 viewer.showAll();
+                                if (globalSync && onDataClick) onDataClick([]);
                             }}
                             style={{
                                 background: 'transparent',

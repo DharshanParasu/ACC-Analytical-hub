@@ -3,12 +3,23 @@ import { Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { motion } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
+import { useTheme } from '../../context/ThemeContext';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds, joinedData }) => {
+const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds, joinedData, masterData, timelineDate, globalSync }) => {
+    const { theme } = useTheme();
     const chartRef = useRef();
     const { title = 'Bar Chart', data: customData, orientation = 'vertical', attribute, filters, logicalOperator } = config;
+
+    // Define theme-aware colors for Chart.js (Canvas doesn't resolve CSS variables)
+    const chartColors = {
+        grid: theme === 'light' ? '#e2e8f0' : '#282828',
+        ticks: theme === 'light' ? '#475569' : '#b3b3b3',
+        tooltipBg: theme === 'light' ? '#ffffff' : '#181818',
+        tooltipText: theme === 'light' ? '#0f172a' : '#ffffff',
+        tooltipBorder: theme === 'light' ? '#cbd5e1' : '#282828'
+    };
     const [chartData, setChartData] = useState(null);
     const [aggregation, setAggregation] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -17,16 +28,47 @@ const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
         if (viewer && attribute) {
             loadModelData();
         }
-    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds, joinedData]);
+    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds, joinedData, masterData, timelineDate, globalSync, config.timelineDateAttribute]);
 
     const loadModelData = async () => {
         setLoading(true);
         try {
             const aggType = config.aggregationType || 'count';
             const sumAttr = aggType === 'sum' ? (config.sumAttribute || null) : null;
-            const agg = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds, joinedData);
+
+            let res;
+            if (masterData && masterData.length > 0) {
+                console.log('[BarChart] Using Master Data for aggregation');
+                let targetData = masterData;
+
+                // --- TIMELINE SYNC FILTER ---
+                if (globalSync && timelineDate) {
+                    const dateAttr = config.timelineDateAttribute || 'Start Date'; // Fallback
+                    targetData = masterData.filter(row => {
+                        const val = row[dateAttr];
+                        if (!val) return false;
+                        const rowDate = new Date(val);
+                        return !isNaN(rowDate.getTime()) && rowDate <= timelineDate;
+                    });
+                }
+
+                res = analyticsService.aggregateFromMasterData(targetData, attribute, filters, logicalOperator, sumAttr, scopedDbIds);
+            } else {
+                console.log('[BarChart] Using Viewer Query (Legacy) for aggregation');
+                res = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds, joinedData);
+            }
+
+            const agg = res.data;
+            const detectedUnit = res.unit;
+
             setAggregation(agg);
             const data = analyticsService.getChartData(agg, attribute, 'Total', 'bar', aggType);
+
+            // Add unit metadata to datasets for formatting
+            if (data.datasets?.[0]) {
+                data.datasets[0].unit = detectedUnit || config.unit || '';
+            }
+
             setChartData(data);
         } catch (err) {
             console.error('Failed to load chart data:', err);
@@ -59,18 +101,51 @@ const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
         plugins: {
             legend: { display: false },
             tooltip: {
-                backgroundColor: '#181818',
+                backgroundColor: chartColors.tooltipBg,
                 padding: 12,
-                titleColor: '#ffffff',
-                bodyColor: '#b3b3b3',
-                borderColor: '#282828',
+                titleColor: chartColors.tooltipText,
+                bodyColor: chartColors.tooltipText,
+                borderColor: chartColors.tooltipBorder,
                 borderWidth: 1,
-                cornerRadius: 8
+                cornerRadius: 8,
+                callbacks: {
+                    label: (context) => {
+                        const val = context.raw;
+                        const unit = context.dataset.unit || '';
+                        return analyticsService.formatValue(val, {
+                            exact: config.exact !== undefined ? config.exact : true,
+                            decimals: 2,
+                            unit
+                        });
+                    }
+                }
             }
         },
         scales: {
-            x: { grid: { color: '#1a1a1a', borderColor: '#282828' }, ticks: { color: '#b3b3b3', font: { size: 10, family: 'Inter' } } },
-            y: { grid: { color: '#1a1a1a', borderColor: '#282828' }, ticks: { color: '#b3b3b3', font: { size: 10, family: 'Inter' } } }
+            x: {
+                grid: {
+                    color: chartColors.grid,
+                    borderColor: chartColors.tooltipBorder
+                },
+                ticks: {
+                    color: chartColors.ticks,
+                    font: { size: 10, family: 'Inter' }
+                }
+            },
+            y: {
+                grid: {
+                    color: chartColors.grid,
+                    borderColor: chartColors.tooltipBorder
+                },
+                ticks: {
+                    color: chartColors.ticks,
+                    font: { size: 10, family: 'Inter' },
+                    callback: (value) => analyticsService.formatValue(value, {
+                        exact: false, // Use abbreviated for Y-axis generally
+                        decimals: 0
+                    })
+                }
+            }
         },
         onClick: (event, elements) => {
             if (elements.length > 0 && aggregation && onDataClick) {

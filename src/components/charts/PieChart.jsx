@@ -3,12 +3,23 @@ import { Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { motion } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
+import { useTheme } from '../../context/ThemeContext';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
-const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds, joinedData, masterData }) => {
+const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds, joinedData, masterData, timelineDate, globalSync }) => {
+    const { theme } = useTheme();
     const chartRef = useRef();
     const { title = 'Pie Chart', data: customData, attribute, filters, logicalOperator } = config;
+
+    // Define theme-aware colors for Chart.js (Canvas doesn't resolve CSS variables)
+    const chartColors = {
+        grid: theme === 'light' ? '#e2e8f0' : '#282828',
+        ticks: theme === 'light' ? '#475569' : '#b3b3b3',
+        tooltipBg: theme === 'light' ? '#ffffff' : '#181818',
+        tooltipText: theme === 'light' ? '#0f172a' : '#ffffff',
+        tooltipBorder: theme === 'light' ? '#cbd5e1' : '#282828'
+    };
     const [chartData, setChartData] = useState(null);
     const [aggregation, setAggregation] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -17,7 +28,7 @@ const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
         if (viewer && attribute) {
             loadModelData();
         }
-    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds, joinedData, masterData]);
+    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds, joinedData, masterData, timelineDate, globalSync, config.timelineDateAttribute]);
 
     const loadModelData = async () => {
         setLoading(true);
@@ -25,20 +36,42 @@ const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
             const aggType = config.aggregationType || 'count';
             const sumAttr = aggType === 'sum' ? (config.sumAttribute || null) : null;
 
-            let agg;
+            let res;
 
             if (masterData && masterData.length > 0) {
                 // FAST PATH: Synchronous Aggregation from Master Data
                 console.log('[PieChart] Using Master Data for aggregation');
-                agg = analyticsService.aggregateFromMasterData(masterData, attribute, filters, logicalOperator, sumAttr, scopedDbIds);
+                let targetData = masterData;
+
+                // --- TIMELINE SYNC FILTER ---
+                if (globalSync && timelineDate) {
+                    const dateAttr = config.timelineDateAttribute || 'Start Date'; // Fallback
+                    targetData = masterData.filter(row => {
+                        const val = row[dateAttr];
+                        if (!val) return false;
+                        const rowDate = new Date(val);
+                        return !isNaN(rowDate.getTime()) && rowDate <= timelineDate;
+                    });
+                }
+
+                res = analyticsService.aggregateFromMasterData(targetData, attribute, filters, logicalOperator, sumAttr, scopedDbIds);
             } else {
                 // SLOW PATH: Async Query against Viewer
                 console.log('[PieChart] Using Viewer Query (Legacy) for aggregation');
-                agg = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds, joinedData);
+                res = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds, joinedData);
             }
+
+            const agg = res.data;
+            const detectedUnit = res.unit;
 
             setAggregation(agg);
             const data = analyticsService.getChartData(agg, attribute, 'Total', 'pie', aggType);
+
+            // Add unit metadata
+            if (data.datasets?.[0]) {
+                data.datasets[0].unit = detectedUnit || config.unit || '';
+            }
+
             setChartData(data);
         } catch (err) {
             console.error('Failed to load chart data:', err);
@@ -71,7 +104,7 @@ const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
             legend: {
                 position: 'bottom',
                 labels: {
-                    color: '#b3b3b3',
+                    color: chartColors.ticks,
                     padding: 16,
                     font: { size: 11, family: 'Inter' },
                     boxWidth: 8,
@@ -79,13 +112,24 @@ const PieChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
                 }
             },
             tooltip: {
-                backgroundColor: '#181818',
+                backgroundColor: chartColors.tooltipBg,
                 padding: 12,
-                titleColor: '#ffffff',
-                bodyColor: '#b3b3b3',
-                borderColor: '#282828',
+                titleColor: chartColors.tooltipText,
+                bodyColor: chartColors.tooltipText,
+                borderColor: chartColors.tooltipBorder,
                 borderWidth: 1,
-                cornerRadius: 8
+                cornerRadius: 8,
+                callbacks: {
+                    label: (context) => {
+                        const val = context.raw;
+                        const unit = context.dataset.unit || '';
+                        return `${context.label}: ${analyticsService.formatValue(val, {
+                            exact: config.exact !== undefined ? config.exact : true,
+                            decimals: 2,
+                            unit
+                        })}`;
+                    }
+                }
             }
         },
         onClick: (event, elements) => {

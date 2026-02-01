@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9,8 +9,9 @@ import { useTheme } from '../../context/ThemeContext';
 import {
     Box, Calendar, DollarSign, Leaf, Calculator, Eye, AlertTriangle, CheckSquare,
     Database, Save, X, Info, Trash2, Plus, RefreshCw, Inbox, FileSpreadsheet, Search,
-    CheckCircle2, XCircle
+    CheckCircle2, XCircle, TableProperties
 } from 'lucide-react';
+import SchemaTable from './SchemaTable';
 
 const TABS = [
     { id: 'model', label: '3D Model', icon: Box },
@@ -18,21 +19,148 @@ const TABS = [
     { id: 'cost', label: 'Cost', icon: DollarSign },
     { id: 'carbon', label: 'Carbon', icon: Leaf },
     { id: 'calculations', label: 'Calculations', icon: Calculator },
+    { id: 'schema', label: 'Schema', icon: TableProperties },
     { id: 'preview', label: 'Data Preview', icon: Eye },
     { id: 'clash', label: 'Clash', icon: AlertTriangle },
     { id: 'checker', label: 'Model Checker', icon: CheckSquare }
 ];
 
-const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onPropertiesLoaded, hasViewerComponent, onRefreshAll, isRefreshing, availableProperties, isCollapsed, masterData }) => {
+const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onPropertiesLoaded, hasViewerComponent, onRefreshAll, isRefreshing, availableProperties, isCollapsed, masterData, modelLoaded }) => {
     const { theme } = useTheme();
     const [activeTab, setActiveTab] = useState('model');
     const [showFileExplorer, setShowFileExplorer] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [localProperties, setLocalProperties] = useState([]);
     const [visibleColumns, setVisibleColumns] = useState([]);
+    const [showSchemaPopup, setShowSchemaPopup] = useState(false);
+    const [pendingSchema, setPendingSchema] = useState(null);
+    const [pendingSourceData, setPendingSourceData] = useState(null);
+    const [pendingModelScan, setPendingModelScan] = useState(false); // Track if we're waiting for model to load
 
     // Use props if available, otherwise local state
     // const availableProperties = propProperties || localProperties;
+
+    // Helper to merge new properties into schema
+    const mergeSchema = (newProps, sourceName, sourceType, detectedTypes = {}) => {
+        const currentSchema = projectData.schemaConfig || { properties: {} };
+        const newProperties = { ...currentSchema.properties };
+
+        if (!newProps || newProps.length === 0) return;
+
+        newProps.forEach(prop => {
+            const uniqueKey = `${sourceName}:${prop}`;
+
+            if (!newProperties[uniqueKey]) {
+                newProperties[uniqueKey] = {
+                    source: sourceType,
+                    sourceName: sourceName,
+                    originalName: prop,
+                    alias: '',
+                    type: detectedTypes[prop] || 'text',
+                    include: true
+                };
+            }
+        });
+
+        onUpdateProjectData({
+            ...projectData,
+            schemaConfig: { properties: newProperties }
+        });
+    };
+
+    const openSchemaConfig = (newProps, sourceName, sourceType, dataSample = []) => {
+        // Auto-detect types if data sample exists
+        const detectedTypes = {};
+        if (dataSample.length > 0) {
+            newProps.forEach(prop => {
+                const values = dataSample.map(row => row[prop]).filter(v => v !== undefined && v !== null && v !== '');
+                if (values.length === 0) {
+                    detectedTypes[prop] = 'text';
+                    return;
+                }
+
+                const firstVal = values[0];
+                if (firstVal instanceof Date) {
+                    detectedTypes[prop] = 'date';
+                } else if (typeof firstVal === 'number') {
+                    detectedTypes[prop] = 'number';
+                } else if (typeof firstVal === 'boolean') {
+                    detectedTypes[prop] = 'boolean';
+                } else {
+                    // Try parsing string as date or number
+                    const asNum = Number(firstVal);
+                    const asDate = new Date(firstVal);
+                    if (!isNaN(asNum) && String(firstVal).trim() !== '') {
+                        detectedTypes[prop] = 'number';
+                    } else if (!isNaN(asDate.getTime()) && String(firstVal).length > 5) {
+                        detectedTypes[prop] = 'date';
+                    } else {
+                        detectedTypes[prop] = 'text';
+                    }
+                }
+            });
+        }
+
+        const pendingProps = {};
+        newProps.forEach(prop => {
+            pendingProps[`${sourceName}:${prop}`] = {
+                source: sourceType,
+                sourceName: sourceName,
+                originalName: prop,
+                alias: '',
+                type: detectedTypes[prop] || 'text',
+                include: true
+            };
+        });
+
+        setPendingSchema({ properties: pendingProps });
+        setPendingSourceData({ sourceName, sourceType, props: newProps });
+        setShowSchemaPopup(true);
+    };
+
+    const confirmSchemaMerge = () => {
+        if (!pendingSchema) return;
+
+        const currentSchema = projectData.schemaConfig || { properties: {} };
+        const updatedProperties = { ...currentSchema.properties, ...pendingSchema.properties };
+
+        onUpdateProjectData({
+            ...projectData,
+            schemaConfig: { properties: updatedProperties },
+            isDirty: true
+        });
+
+        setShowSchemaPopup(false);
+        setPendingSchema(null);
+        setPendingSourceData(null);
+    };
+
+    // Auto-populate on tab switch if empty and data exists
+    useEffect(() => {
+        if (activeTab === 'schema') {
+            const hasSchema = projectData.schemaConfig && Object.keys(projectData.schemaConfig.properties).length > 0;
+            if (!hasSchema) {
+                // Priority: availableProperties (Master List) > localProperties (Local Scan)
+                if (availableProperties && availableProperties.length > 0) {
+                    console.log("Auto-populating schema from Master List...", availableProperties.length);
+                    mergeSchema(availableProperties, 'model', 'model');
+                } else if (localProperties.length > 0) {
+                    console.log("Auto-populating schema from Local Scan...", localProperties.length);
+                    mergeSchema(localProperties, 'model', 'model');
+                }
+            }
+        }
+    }, [activeTab, localProperties, availableProperties, projectData.schemaConfig]);
+
+    // AUTO-SCAN LOGIC: Trigger scan when model is loaded if pending
+    useEffect(() => {
+        if (pendingModelScan && modelLoaded && viewer) {
+            console.log("Model loaded! Triggering auto-scan...");
+            setPendingModelScan(false);
+            fetchProperties();
+        }
+    }, [modelLoaded, pendingModelScan, viewer]);
+
 
     // Fetch model properties for mapping
     const fetchProperties = async () => {
@@ -53,6 +181,8 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                 if (onPropertiesLoaded) {
                     onPropertiesLoaded(props);
                 }
+                // Open Schema Config instead of auto-merging
+                openSchemaConfig(props, 'model', 'model');
             } else {
                 alert("No properties found in the model. Please ensure the model is fully loaded.");
             }
@@ -75,6 +205,9 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                     projectName: selection.project.name
                 }
             });
+            // Set pending scan flag to true - waiting for model to load
+            setPendingModelScan(true);
+            setIsLoading(true); // Show loading state while waiting
         } else {
             // Handle External Data Sources (Excel)
             if (!selection.model.name.endsWith('.xlsx')) {
@@ -89,7 +222,7 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                     selection.model.urn
                 );
 
-                const workbook = XLSX.read(buffer, { type: 'array' });
+                const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
@@ -117,6 +250,9 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                             [activeTab]: newSource
                         }
                     });
+
+                    // Open Schema Config instead of auto-merging
+                    openSchemaConfig(headers, selection.model.name, 'excel', jsonData.slice(0, 10));
                 }
             } catch (err) {
                 console.error("Error parsing Excel:", err);
@@ -172,7 +308,7 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
 
     const renderContent = () => (
         <div style={containerStyle}>
-            {isRefreshing && (
+            {(isRefreshing || isLoading || pendingModelScan) && (
                 <div style={{
                     position: 'absolute',
                     inset: 0,
@@ -200,7 +336,11 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                         fontSize: '16px',
                         letterSpacing: '-0.02em'
                     }}>
-                        Merging Data...
+                        {pendingModelScan
+                            ? "Waiting for Model to Load..."
+                            : isRefreshing
+                                ? "Merging Data..."
+                                : "Processing..."}
                     </div>
                 </div>
             )}
@@ -305,6 +445,16 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                                         <RefreshCw className="w-3 h-3 animate-spin opacity-50" />
                                     ) : (
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            {/* Show Match Count if available */}
+                                            {tab.id === 'calculations' ? (
+                                                projectData.calculations?.length > 0 && (
+                                                    <span style={{ fontSize: '10px', opacity: 0.7 }}>{projectData.calculations.length}</span>
+                                                )
+                                            ) : stats && stats.matchCount >= 0 && (
+                                                <span style={{ fontSize: '10px', opacity: 0.7 }}>{stats.matchCount}</span>
+                                            )}
+
+                                            {/* Status Dot */}
                                             {tab.id === 'calculations' ? (
                                                 projectData.isDirty && (
                                                     <div style={{
@@ -316,19 +466,16 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                                                     }} title="Changes require sync" />
                                                 )
                                             ) : (
-                                                source?.isDirty ? (
-                                                    <div style={{
-                                                        width: '6px',
-                                                        height: '6px',
-                                                        borderRadius: '50%',
-                                                        background: '#f59e0b',
-                                                        boxShadow: '0 0 8px #f59e0b'
-                                                    }} title="Changes require sync" />
-                                                ) : status && (
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                        {stats && stats.matchCount > 0 && (
-                                                            <span style={{ fontSize: '10px', opacity: 0.7 }}>{stats.matchCount}</span>
-                                                        )}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    {source?.isDirty ? (
+                                                        <div style={{
+                                                            width: '6px',
+                                                            height: '6px',
+                                                            borderRadius: '50%',
+                                                            background: '#f59e0b',
+                                                            boxShadow: '0 0 8px #f59e0b'
+                                                        }} title="Changes require sync" />
+                                                    ) : status && (
                                                         <div style={{
                                                             width: '6px',
                                                             height: '6px',
@@ -336,8 +483,8 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                                                             background: status === 'success' ? '#10b981' : status === 'warning' ? '#f59e0b' : '#ef4444',
                                                             boxShadow: status === 'success' ? '0 0 8px #10b981' : 'none'
                                                         }} />
-                                                    </div>
-                                                )
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     )}
@@ -451,6 +598,39 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    ) : activeTab === 'schema' ? (
+                        <div style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                            {(!projectData.schemaConfig || Object.keys(projectData.schemaConfig.properties).length === 0) && (
+                                <div style={{ padding: '10px', background: 'var(--color-bg-elevated)', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <span style={{ fontSize: '12px', color: 'var(--color-text-subdued)' }}>
+                                            No properties in schema.
+                                        </span>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => {
+                                                // Priority: availableProperties (Master List) > localProperties
+                                                if (availableProperties && availableProperties.length > 0) {
+                                                    mergeSchema(availableProperties, 'model', 'model');
+                                                } else if (localProperties.length > 0) {
+                                                    mergeSchema(localProperties, 'model', 'model');
+                                                } else {
+                                                    fetchProperties();
+                                                }
+                                            }}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                                        >
+                                            <RefreshCw className="w-3 h-3" />
+                                            {(availableProperties?.length > 0 || localProperties.length > 0) ? 'Populate from Master List' : 'Scan Model'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            <SchemaTable
+                                schema={projectData.schemaConfig}
+                                onUpdateSchema={(newSchema) => onUpdateProjectData({ ...projectData, schemaConfig: newSchema })}
+                            />
                         </div>
                     ) : activeTab === 'preview' ? (
                         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -745,6 +925,78 @@ const DataSourcesPanel = ({ projectData, onUpdateProjectData, viewer, onProperti
                             </div>
                         </div>
                     )}
+
+                    {/* Schema Selection Popup */}
+                    <AnimatePresence>
+                        {showSchemaPopup && (
+                            <div style={{
+                                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                                background: 'rgba(0,0,0,0.85)', zIndex: 3000,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                backdropFilter: 'blur(8px)'
+                            }}>
+                                <motion.div
+                                    initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                                    exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                                    style={{
+                                        width: '850px',
+                                        height: '650px',
+                                        background: 'var(--color-bg-elevated)',
+                                        borderRadius: 'var(--radius-lg)',
+                                        border: '1px solid var(--color-border)',
+                                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                                        overflow: 'hidden',
+                                        display: 'flex',
+                                        flexDirection: 'column'
+                                    }}
+                                >
+                                    {/* Header */}
+                                    <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-base)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: 'var(--color-text-base)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <TableProperties className="w-5 h-5 text-lime-400" />
+                                                Configure Data Schema
+                                            </h3>
+                                            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--color-text-subdued)' }}>
+                                                Source: <strong style={{ color: 'var(--color-text-base)' }}>{pendingSourceData?.sourceName}</strong> ({pendingSourceData?.sourceType})
+                                            </p>
+                                        </div>
+                                        <button onClick={() => setShowSchemaPopup(false)} className="btn-icon">
+                                            <X className="w-5 h-5" />
+                                        </button>
+                                    </div>
+
+                                    {/* Content */}
+                                    <div style={{ flex: 1, overflow: 'hidden', padding: '0' }}>
+                                        <SchemaTable
+                                            schema={pendingSchema}
+                                            onUpdateSchema={setPendingSchema}
+                                        />
+                                    </div>
+
+                                    {/* Footer */}
+                                    <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-border)', background: 'var(--color-bg-base)', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                                        <button
+                                            onClick={() => setShowSchemaPopup(false)}
+                                            className="btn btn-secondary"
+                                            style={{ padding: '8px 20px' }}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={confirmSchemaMerge}
+                                            className="btn btn-primary"
+                                            style={{ padding: '8px 24px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                                        >
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            Confirm & Add to Schema
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
 
                     {/* File Explorer Modal */}
                     <AnimatePresence>

@@ -31,8 +31,13 @@ const componentTypes = [
     { type: 'line', icon: TrendingUp, label: 'Line Chart', component: LineChart, defaultSize: { w: 6, h: 3 } },
     { type: 'kpi', icon: Target, label: 'KPI Card', component: KPICard, defaultSize: { w: 2, h: 2 } },
     { type: 'table', icon: List, label: 'Data Table', component: DataTable, defaultSize: { w: 6, h: 3 } },
-    { type: 'schedule', icon: Calendar, label: 'Schedule Visual', component: ScheduleVisual, defaultSize: { w: 12, h: 6 } },
-    { type: 'chatbot', icon: MessageSquare, label: 'AI Assistant', component: AIChatBot, defaultSize: { w: 4, h: 5 } }
+    {
+        type: 'schedule', icon: Calendar, label: 'Schedule Visual', component: ScheduleVisual, defaultSize: { w: 12, h: 6 }, defaultConfig: {
+            activityNameAttribute: 'Activity Name',
+            startDateAttribute: 'Start Date',
+            endDateAttribute: 'End Date'
+        }
+    }
 ];
 
 class ErrorBoundary extends Component {
@@ -76,49 +81,20 @@ const DashboardBuilder = () => {
     const [showFileExplorer, setShowFileExplorer] = useState(false);
     const [fileExplorerTarget, setFileExplorerTarget] = useState('viewer');
 
-    // Interaction Sync State
-    const [interactionSync, setInteractionSync] = useState(false);
+    // Unified Sync State
+    const [globalSync, setGlobalSync] = useState(false);
     const [paletteCollapsed, setPaletteCollapsed] = useState(false);
     const [settingsCollapsed, setSettingsCollapsed] = useState(false);
-    const [isPaletteDocked, setIsPaletteDocked] = useState(false);
-    const [isSettingsDocked, setIsSettingsDocked] = useState(false);
-    const [palettePopPos, setPalettePopPos] = useState({ x: 24, y: 500 }); // Even safer default
-    const [settingsPopPos, setSettingsPopPos] = useState({ x: 800, y: 500 }); // Even safer default-right
+    const [isAIChatOpen, setIsAIChatOpen] = useState(false);
 
-    // Panel Resizing State
-    const [paletteSize, setPaletteSize] = useState({ w: 260, h: 500 });
-    const [settingsSize, setSettingsSize] = useState({ w: 320, h: 600 });
-    const resizingRef = useRef(null); // 'palette' or 'settings'
+    // Panel Resizing State (Simplified for docked panels)
+    const [paletteWidth, setPaletteWidth] = useState(280);
+    const [settingsWidth, setSettingsWidth] = useState(320);
 
-    // Bounds Correction Effect
-    useEffect(() => {
-        const handleResize = () => {
-            const container = containerRef.current;
-            if (!container) return;
-            const { offsetWidth: w, offsetHeight: h } = container;
-
-            setPalettePopPos(prev => ({
-                x: Math.min(prev.x, w - 60),
-                y: Math.min(prev.y, h - 80)
-            }));
-            setSettingsPopPos(prev => ({
-                x: Math.min(prev.x, w - 60),
-                y: Math.min(prev.y, h - 80)
-            }));
-        };
-
-        window.addEventListener('resize', handleResize);
-        // Also run once on mount
-        const timer = setTimeout(handleResize, 500);
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            clearTimeout(timer);
-        };
-    }, []);
 
     const [currentSelection, setCurrentSelection] = useState([]);
-
     const [selectedComponentId, setSelectedComponentId] = useState(null);
+    const resizingRef = useRef(null);
     const [viewer, setViewer] = useState(null);
     const [modelLoaded, setModelLoaded] = useState(false);
     const [availableProperties, setAvailableProperties] = useState([]);
@@ -128,12 +104,10 @@ const DashboardBuilder = () => {
     // Master Data for Sync Aggregation (Single Source of Truth)
     const [masterData, setMasterData] = useState([]);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [timelineDate, setTimelineDate] = useState(null);
 
-    // Node refs for react-draggable to avoid findDOMNode error
     const paletteRef = useRef(null);
     const settingsRef = useRef(null);
-    const palettePopRef = useRef(null);
-    const settingsPopRef = useRef(null);
     const containerRef = useRef(null);
 
     const [isFullScreen, setIsFullScreen] = useState(false);
@@ -208,15 +182,10 @@ const DashboardBuilder = () => {
             if (!resizingRef.current) return;
 
             if (resizingRef.current === 'palette') {
-                setPaletteSize(prev => ({
-                    w: Math.max(200, prev.w + e.movementX),
-                    h: Math.max(300, prev.h + e.movementY)
-                }));
+                setPaletteWidth(prev => Math.max(200, Math.min(600, prev + e.movementX)));
             } else if (resizingRef.current === 'settings') {
-                setSettingsSize(prev => ({
-                    w: Math.max(250, prev.w + e.movementX), // Settings on right, dragging right increases width
-                    h: Math.max(300, prev.h + e.movementY)
-                }));
+                // Dragging left (negative movementX) should increase width for right sidebar
+                setSettingsWidth(prev => Math.max(250, Math.min(800, prev - e.movementX)));
             }
         };
 
@@ -317,7 +286,7 @@ const DashboardBuilder = () => {
         // Listen for selection changes to update global selection state
         try {
             viewerInstance.addEventListener(window.Autodesk.Viewing.SELECTION_CHANGED_EVENT, (event) => {
-                if (!interactionSync) return;
+                if (!globalSync) return;
 
                 const selection = viewerInstance.getSelection();
                 console.log('[Dashboard] Selection changed (Sync ON):', selection);
@@ -495,7 +464,10 @@ const DashboardBuilder = () => {
                     propertiesLoading={propsLoading}
                     onDataClick={handleChartDataClick}
                     onThematicColorChange={handleThematicColorChange}
-                    scopedDbIds={interactionSync && currentSelection.length > 0 ? currentSelection : null}
+                    scopedDbIds={globalSync && currentSelection.length > 0 ? currentSelection : null}
+                    globalSync={globalSync}
+                    timelineDate={timelineDate}
+                    onTimelineDateChange={setTimelineDate}
                 />
             </div>
         );
@@ -531,15 +503,18 @@ const DashboardBuilder = () => {
 
                     try {
                         const arrayBuffer = await apsService.getFileContent(source.fileUrn, token);
-                        const workbook = window.XLSX.read(arrayBuffer, { type: 'array' });
+                        const workbook = window.XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
                         const firstSheetName = workbook.SheetNames[0];
                         const worksheet = workbook.Sheets[firstSheetName];
                         const jsonData = window.XLSX.utils.sheet_to_json(worksheet);
+                        const headers = Object.keys(jsonData[0] || {});
+                        console.log(`[Builder] Extracted Excel headers for ${source.fileName}:`, headers);
 
                         // Update source object in place
                         newSources[key] = {
                             ...source,
                             data: jsonData,
+                            headers: headers,
                             lastUpdated: new Date().toISOString(),
                             isDirty: false // Reset dirty flag after successful download
                         };
@@ -555,14 +530,91 @@ const DashboardBuilder = () => {
             const updatedProjectData = { ...projectData, sources: newSources };
             setProjectData(updatedProjectData);
 
-            // 2. Fetch ALL Master Data (Model + External)
-            console.log('[Builder] Fetching master data...');
-            const syncResult = await analyticsService.getAllData(targetViewer, updatedProjectData);
+            // 2. Prepare Property List for Fetching
+            // If Schema exists, only ask for Included Model Properties
+            let modelPropsToFetch = null;
+            if (updatedProjectData.schemaConfig && updatedProjectData.schemaConfig.properties) {
+                modelPropsToFetch = Object.values(updatedProjectData.schemaConfig.properties)
+                    .filter(p => p.source === 'model' && p.include)
+                    .map(p => p.originalName);
+
+                // Ensure mapping keys are always fetched even if not explicitly "included" in schema
+                // otherwise merging will fail
+                Object.values(updatedProjectData.sources).forEach(src => {
+                    if (src.mapping?.modelKey) modelPropsToFetch.push(src.mapping.modelKey);
+                });
+                modelPropsToFetch = [...new Set(modelPropsToFetch)]; // Dedupe
+            }
+
+            // 3. Fetch Master Data
+            console.log('[Builder] Fetching master data with props:', modelPropsToFetch);
+            const syncResult = await analyticsService.getAllData(targetViewer, updatedProjectData, modelPropsToFetch);
 
             const finalSources = { ...updatedProjectData.sources };
 
             if (syncResult && !syncResult.error) {
-                const results = syncResult.results || [];
+                let results = syncResult.results || [];
+
+                // 4. Apply Schema Transformations (Aliasing & Typing)
+                if (updatedProjectData.schemaConfig && updatedProjectData.schemaConfig.properties) {
+                    console.log('[Builder] Applying Schema Transformations...');
+                    const schemaProps = Object.values(updatedProjectData.schemaConfig.properties).filter(p => p.include);
+
+                    results = results.map(row => {
+                        const newRow = { dbId: row.dbId, name: row.name }; // Always keep ID and Name
+
+                        schemaProps.forEach(prop => {
+                            const val = row[prop.originalName];
+                            const finalKey = prop.alias || prop.originalName;
+
+                            // 1. Source Collision Prevention
+                            // If we already have a value for this alias (finalKey) from a previous schema prop 
+                            // (e.g. from a different source), and the current value is null/empty, don't overwrite.
+                            if (newRow[finalKey] !== undefined && (val === undefined || val === null || val === '')) {
+                                return;
+                            }
+
+                            // 2. Specialized Type Conversion
+                            let finalVal = val;
+                            if (val !== undefined && val !== null && val !== '') {
+                                if (prop.type === 'number') {
+                                    const num = parseFloat(val);
+                                    finalVal = isNaN(num) ? 0 : num;
+                                } else if (prop.type === 'date') {
+                                    // Handle JS Date objects (from XLSX cellDates: true)
+                                    if (val instanceof Date) {
+                                        finalVal = val;
+                                    }
+                                    // Handle Excel Serial Numbers (e.g. 45000+ is recent years)
+                                    else if (typeof val === 'number' && val > 30000) {
+                                        finalVal = new Date(Math.round((val - 25569) * 86400 * 1000));
+                                    }
+                                    // Fallback to string parsing
+                                    else {
+                                        const date = new Date(val);
+                                        finalVal = isNaN(date.getTime()) ? val : date;
+                                    }
+
+                                    // Final Safety: If conversion resulted in 1970 and original wasn't 0, it's likely wrong
+                                    if (finalVal instanceof Date && finalVal.getFullYear() <= 1970 && val !== 0 && val !== '0') {
+                                        finalVal = val; // Revert to raw string if suspicious
+                                    }
+                                } else if (prop.type === 'boolean') {
+                                    const strVal = String(val).toLowerCase();
+                                    finalVal = strVal === 'true' || strVal === '1' || strVal === 'yes';
+                                } else {
+                                    finalVal = String(val);
+                                }
+                            } else {
+                                // Explicitly set null if empty
+                                finalVal = null;
+                            }
+                            newRow[finalKey] = finalVal;
+                        });
+                        return newRow;
+                    });
+                }
+
                 setMasterData(results);
 
                 // Update statuses from stats
@@ -606,8 +658,10 @@ const DashboardBuilder = () => {
                 isDirty: false // Reset global project dirty flag (used for calcs)
             }));
 
-            // 3. Re-fetch Property List for UI
-            await fetchProperties(targetViewer);
+            // 5. Re-fetch Property List for UI (if needed, but schema is now source of truth)
+            if (!projectData.schemaConfig) {
+                await fetchProperties(targetViewer);
+            }
 
         } catch (error) {
             console.error('[Builder] Error during Save & Merge:', error);
@@ -633,722 +687,14 @@ const DashboardBuilder = () => {
                         </div>
                     )}
 
-                    <div className={`relative w-full ${isFullScreen ? 'h-full' : 'h-[calc(100vh-140px)]'} visible opacity-100 overflow-hidden flex flex-col`}>
-                        {/* Floating Sidebars Wrap */}
-                        <div className="absolute inset-0 w-full h-full pointer-events-none z-50 overflow-hidden">
-                            {/* 1. Component Palette - Round Pop or Full Panel */}
-                            <AnimatePresence mode="wait">
-                                {isPaletteDocked ? (
-                                    <Draggable
-                                        key="palette-pop"
-                                        nodeRef={palettePopRef}
-                                        position={palettePopPos}
-                                        onDrag={(e, data) => setPalettePopPos({ x: data.x, y: data.y })}
-                                        bounds="parent"
-                                    >
-                                        <div
-                                            ref={palettePopRef}
-                                            className="absolute z-[60] w-14 h-14 pointer-events-auto"
-                                            style={{ cursor: 'move' }}
-                                        >
-                                            <motion.div
-                                                initial={{ scale: 0, opacity: 0 }}
-                                                animate={{ scale: 1, opacity: 1 }}
-                                                exit={{ scale: 0, opacity: 0 }}
-                                                whileHover={{ scale: 1.1 }}
-                                                whileTap={{ scale: 0.9 }}
-                                                className="w-full h-full flex items-center justify-center"
-                                            >
-                                                <button
-                                                    onClick={() => setIsPaletteDocked(false)}
-                                                    className="w-full h-full rounded-full bg-gradient-to-br from-lime-400 to-lime-500 text-black shadow-[0_8px_32px_rgba(163,230,53,0.4)] flex items-center justify-center cursor-pointer border-none group transition-all duration-300"
-                                                    title="Open Components"
-                                                >
-                                                    <Box className="w-6 h-6 group-hover:rotate-12 transition-transform" />
-                                                </button>
-                                            </motion.div>
-                                        </div>
-                                    </Draggable>
-                                ) : (
-                                    <Draggable
-                                        key="palette-floating"
-                                        nodeRef={paletteRef}
-                                        handle=".panel-handle"
-                                        bounds="parent"
-                                    >
-                                        <motion.div
-                                            ref={paletteRef}
-                                            initial={{ x: -20, opacity: 0 }}
-                                            animate={{ x: 0, opacity: 1 }}
-                                            exit={{ x: -20, opacity: 0 }}
-                                            className="floating-panel border border-[var(--color-border)] rounded-2xl p-4 flex flex-col gap-4 shadow-2xl pointer-events-auto absolute left-6 top-6"
-                                            style={{
-                                                width: paletteCollapsed ? '64px' : `${paletteSize.w}px`,
-                                                height: paletteCollapsed ? 'auto' : `${paletteSize.h}px`,
-                                                minHeight: '200px',
-                                                maxHeight: 'calc(100vh - 100px)',
-                                                overflow: 'hidden',
-                                                background: theme === 'light' ? '#ffffff' : '#1a1a1a',
-                                                zIndex: 50
-                                            }}
-                                        >
-                                            {/* Drag Handle & Controls */}
-                                            <div className={`flex items-center mb-2 ${paletteCollapsed ? 'justify-center' : 'justify-between'}`}>
-                                                {!paletteCollapsed && (
-                                                    <div className="panel-handle cursor-move text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors">
-                                                        <GripHorizontal className="w-5 h-5" />
-                                                    </div>
-                                                )}
-                                                <div className="flex items-center gap-1">
-                                                    {!paletteCollapsed && (
-                                                        <button
-                                                            onClick={() => setIsPaletteDocked(true)}
-                                                            className="p-1.5 rounded-lg hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors"
-                                                            title="Minimize to Round Pop"
-                                                        >
-                                                            <ArrowDownToLine className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => setPaletteCollapsed(!paletteCollapsed)}
-                                                        className="bg-transparent border-none text-[var(--color-text-muted)] cursor-pointer text-xs p-1.5 hover:text-[var(--color-text-base)] transition-colors flex items-center justify-center rounded-lg hover:bg-[var(--color-hover)]"
-                                                        title={paletteCollapsed ? "Expand Panel" : "Collapse Panel"}
-                                                    >
-                                                        {paletteCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-                                                    </button>
-                                                </div>
-                                            </div>
-
-
-                                            <DataSourcesPanel
-                                                projectData={projectData}
-                                                onUpdateProjectData={(newData) => {
-                                                    console.log('[Builder] Updating project data from panel', newData);
-                                                    setProjectData(newData);
-                                                }}
-                                                viewer={viewer}
-                                                onPropertiesLoaded={setAvailableProperties}
-                                                hasViewerComponent={components.some(c => c.type === 'viewer')}
-                                                onRefreshAll={handleSaveData}
-                                                isRefreshing={isRefreshing}
-                                                availableProperties={availableProperties}
-                                                isCollapsed={paletteCollapsed}
-                                                masterData={masterData}
-                                            />
-
-
-                                            {!paletteCollapsed && (
-                                                <h3 className="text-sm font-semibold text-[var(--color-text-base)] uppercase tracking-widest mb-2">
-                                                    Components
-                                                </h3>
-                                            )}
-
-                                            <div className="flex flex-col gap-2 flex-1 overflow-y-auto pr-1">
-                                                <div className="flex flex-col gap-2">
-                                                    {componentTypes.map((compType) => {
-                                                        const Icon = compType.icon;
-                                                        return (
-                                                            <button
-                                                                key={compType.type}
-                                                                onClick={() => addComponent(compType.type)}
-                                                                title={paletteCollapsed ? compType.label : ''}
-                                                                className={`rounded-lg cursor-pointer flex items-center gap-3 text-sm font-medium transition-all ${paletteCollapsed ? 'justify-center p-2 bg-transparent hover:bg-[var(--color-hover)]' : 'justify-start p-3 border border-transparent hover:border-[var(--color-border)] bg-[var(--color-bg-elevated)] hover:bg-[var(--color-hover)]'} ${paletteCollapsed ? 'text-[var(--color-text-muted)] hover:text-lime-400' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]'}`}
-                                                            >
-                                                                <Icon className={paletteCollapsed ? "w-8 h-8" : "w-5 h-5"} />
-                                                                {!paletteCollapsed && <span>{compType.label}</span>}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-
-                                                {!paletteCollapsed && (
-                                                    <div className="mt-auto p-3 bg-[var(--color-bg-elevated)] rounded-lg text-xs text-[var(--color-text-muted)] leading-relaxed border border-[var(--color-border)]">
-                                                        💡 Click to add • Drag to move • Resize from corners
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Resize Handle */}
-                                            {!paletteCollapsed && (
-                                                <div
-                                                    onMouseDown={(e) => {
-                                                        e.stopPropagation();
-                                                        resizingRef.current = 'palette';
-                                                        document.body.style.cursor = 'nwse-resize';
-                                                    }}
-                                                    className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize flex items-end justify-end p-0.5 opacity-50 hover:opacity-100"
-                                                    style={{ zIndex: 60 }}
-                                                >
-                                                    <div className="w-full h-full border-b-2 border-r-2 border-[var(--color-text-muted)] rounded-br-sm" />
-                                                </div>
-                                            )}
-                                        </motion.div>
-                                    </Draggable>
-                                )}
-                            </AnimatePresence>
-
-                            {/* 2. Settings Panel - Round Pop or Full Panel */}
-                            <AnimatePresence mode="wait">
-                                {selectedComponentId && (
-                                    isSettingsDocked ? (
-                                        <Draggable
-                                            key="settings-pop"
-                                            nodeRef={settingsPopRef}
-                                            position={settingsPopPos}
-                                            onDrag={(e, data) => setSettingsPopPos({ x: data.x, y: data.y })}
-                                            bounds="parent"
-                                        >
-                                            <div
-                                                ref={settingsPopRef}
-                                                className="absolute z-[60] w-14 h-14 pointer-events-auto"
-                                                style={{ cursor: 'move' }}
-                                            >
-                                                <motion.div
-                                                    initial={{ scale: 0, opacity: 0 }}
-                                                    animate={{ scale: 1, opacity: 1 }}
-                                                    exit={{ scale: 0, opacity: 0 }}
-                                                    whileHover={{ scale: 1.1 }}
-                                                    whileTap={{ scale: 0.9 }}
-                                                    className="w-full h-full flex items-center justify-center"
-                                                >
-                                                    <button
-                                                        onClick={() => setIsSettingsDocked(false)}
-                                                        className="w-full h-full rounded-full bg-gradient-to-br from-blue-400 to-blue-500 text-white shadow-[0_8px_32px_rgba(59,130,246,0.4)] flex items-center justify-center cursor-pointer border-none group transition-all duration-300"
-                                                        title="Open Settings"
-                                                    >
-                                                        <Sliders className="w-6 h-6 group-hover:rotate-45 transition-transform" />
-                                                    </button>
-                                                </motion.div>
-                                            </div>
-                                        </Draggable>
-                                    ) : (
-                                        <Draggable
-                                            key="settings-floating"
-                                            nodeRef={settingsRef}
-                                            handle=".panel-handle"
-                                            bounds="parent"
-                                        >
-                                            <motion.div
-                                                ref={settingsRef}
-                                                initial={{ x: 20, opacity: 0 }}
-                                                animate={{ x: 0, opacity: 1 }}
-                                                exit={{ x: 20, opacity: 0 }}
-                                                className="floating-panel border border-[var(--color-border)] rounded-2xl p-6 flex flex-col gap-4 shadow-2xl pointer-events-auto absolute right-6 top-6"
-                                                style={{
-                                                    width: settingsCollapsed ? '64px' : `${settingsSize.w}px`,
-                                                    height: settingsCollapsed ? 'auto' : `${settingsSize.h}px`,
-                                                    minHeight: '200px',
-                                                    maxHeight: 'calc(100vh - 100px)',
-                                                    overflow: 'hidden',
-                                                    background: theme === 'light' ? '#ffffff' : '#1a1a1a',
-                                                    zIndex: 50
-                                                }}
-                                            >
-                                                {/* Drag Handle & Controls */}
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <div className="panel-handle cursor-move text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors">
-                                                        <GripHorizontal className="w-5 h-5" />
-                                                    </div>
-                                                    <button
-                                                        onClick={() => setIsSettingsDocked(true)}
-                                                        className="p-1.5 rounded-lg hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors"
-                                                        title="Minimize to Round Pop"
-                                                    >
-                                                        <ArrowDownToLine className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-
-                                                <div style={{
-                                                    display: 'flex',
-                                                    justifyContent: settingsCollapsed ? 'center' : 'space-between',
-                                                    alignItems: 'center',
-                                                    flexDirection: settingsCollapsed ? 'column' : 'row',
-                                                    gap: settingsCollapsed ? '12px' : '0'
-                                                }}>
-
-                                                    <button
-                                                        onClick={() => setSettingsCollapsed(!settingsCollapsed)}
-                                                        className="p-2 rounded-lg hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors"
-                                                        title={settingsCollapsed ? "Expand Settings" : "Collapse Settings"}
-                                                    >
-                                                        {settingsCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                                                    </button>
-
-                                                    {!settingsCollapsed && (
-                                                        <>
-                                                            <h3 className="text-sm font-semibold text-[var(--color-text-base)] uppercase tracking-widest">Settings</h3>
-                                                            <button onClick={() => setSelectedComponentId(null)} className="p-1 hover:bg-[var(--color-hover)] rounded transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]">
-                                                                <X className="w-4 h-4" />
-                                                            </button>
-                                                        </>
-                                                    )}
-
-                                                    {settingsCollapsed && (
-                                                        <button onClick={() => setSelectedComponentId(null)} className="p-1 hover:bg-[var(--color-hover)] rounded transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]">
-                                                            <X className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                </div>
-
-                                                {!settingsCollapsed && (
-                                                    <div style={{
-                                                        flex: 1,
-                                                        opacity: 1,
-                                                        transition: 'opacity 0.2s 0.1s',
-                                                        display: 'flex',
-                                                        flexDirection: 'column',
-                                                        gap: '16px',
-                                                        height: '100%',
-                                                        overflowY: 'auto',
-                                                        overflowX: 'hidden',
-                                                        paddingRight: '4px' // prevent scrollbar overlap
-                                                    }}>
-                                                        {/* Content Container to ensure stable width during collapse */}
-                                                        <div style={{ minWidth: '250px' }}>
-                                                            {components.find(c => c.id === selectedComponentId) && (
-                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                                                    <div>
-                                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>WIDGET TITLE</label>
-                                                                        <input
-                                                                            type="text"
-                                                                            value={components.find(c => c.id === selectedComponentId).config.title}
-                                                                            onChange={(e) => updateComponentConfig(selectedComponentId, { title: e.target.value })}
-                                                                            style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                        />
-                                                                    </div>
-
-                                                                    {['pie', 'bar', 'kpi', 'table', 'schedule'].includes(components.find(c => c.id === selectedComponentId).type) && (
-                                                                        <>
-                                                                            <div>
-                                                                                <div style={{ marginBottom: '8px' }}>
-                                                                                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                                                                                        {components.find(c => c.id === selectedComponentId).type === 'table' ? 'GROUP BY COLUMNS' :
-                                                                                            components.find(c => c.id === selectedComponentId).type === 'kpi' ? 'KPI PARAMETER (MODEL/EXCEL)' : 'DATA ATTRIBUTE (BIM)'}
-                                                                                    </label>
-                                                                                </div>
-                                                                                {components.find(c => c.id === selectedComponentId).type === 'table' ? (
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                                                        {(components.find(c => c.id === selectedComponentId).config.attributes || [components.find(c => c.id === selectedComponentId).config.attribute]).filter(Boolean).map((attr, idx) => (
-                                                                                            <div key={idx} style={{ display: 'flex', gap: '8px' }}>
-                                                                                                <select
-                                                                                                    value={attr}
-                                                                                                    onChange={(e) => {
-                                                                                                        const currentAttrs = components.find(c => c.id === selectedComponentId).config.attributes || [components.find(c => c.id === selectedComponentId).config.attribute];
-                                                                                                        const nextAttrs = [...currentAttrs];
-                                                                                                        nextAttrs[idx] = e.target.value;
-                                                                                                        updateComponentConfig(selectedComponentId, { attributes: nextAttrs.filter(Boolean), attribute: nextAttrs[0] });
-                                                                                                    }}
-                                                                                                    style={{ flex: 1, padding: '8px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)', fontSize: '12px' }}
-                                                                                                >
-                                                                                                    {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                                                </select>
-                                                                                                <button
-                                                                                                    onClick={() => {
-                                                                                                        const currentAttrs = components.find(c => c.id === selectedComponentId).config.attributes || [components.find(c => c.id === selectedComponentId).config.attribute];
-                                                                                                        const nextAttrs = currentAttrs.filter((_, i) => i !== idx);
-                                                                                                        updateComponentConfig(selectedComponentId, { attributes: nextAttrs, attribute: nextAttrs[0] || '' });
-                                                                                                    }}
-                                                                                                    style={{ padding: '0 8px', background: 'transparent', border: 'none', color: '#ff4444', cursor: 'pointer' }}
-                                                                                                >×</button>
-                                                                                            </div>
-                                                                                        ))}
-                                                                                        <button
-                                                                                            onClick={() => {
-                                                                                                const currentAttrs = components.find(c => c.id === selectedComponentId).config.attributes || [components.find(c => c.id === selectedComponentId).config.attribute];
-                                                                                                updateComponentConfig(selectedComponentId, { attributes: [...currentAttrs.filter(Boolean), availableProperties[0] || ''] });
-                                                                                            }}
-                                                                                            className="btn btn-secondary"
-                                                                                            style={{ padding: '4px', fontSize: '10px' }}
-                                                                                        >+ ADD COLUMN</button>
-                                                                                    </div>
-
-                                                                                ) : components.find(c => c.id === selectedComponentId).type === 'schedule' ? (
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                                                                        <div style={{ paddingBottom: '12px', borderBottom: '1px solid var(--color-border)' }}>
-                                                                                            <div style={{ fontSize: '0.7rem', color: 'var(--color-primary)', fontWeight: 'bold', marginBottom: '8px' }}>DATA SOURCE</div>
-                                                                                            <button
-                                                                                                className="btn btn-secondary"
-                                                                                                onClick={() => {
-                                                                                                    // Open File Explorer for Excel
-                                                                                                    setFileExplorerTarget(selectedComponentId);
-                                                                                                    setShowFileExplorer(true);
-                                                                                                }}
-                                                                                                style={{ width: '100%', fontSize: '0.8rem', display: 'flex', justifyContent: 'center', gap: '8px' }}
-                                                                                            >
-                                                                                                📄 Link Excel Schedule...
-                                                                                            </button>
-                                                                                            {components.find(c => c.id === selectedComponentId).config.excelParams?.fileName && (
-                                                                                                <div style={{ marginTop: '8px', fontSize: '0.75rem', color: '#4ade80', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                                    <span>✅ Linked:</span>
-                                                                                                    <span style={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                                                                        {components.find(c => c.id === selectedComponentId).config.excelParams.fileName}
-                                                                                                    </span>
-                                                                                                </div>
-                                                                                            )}
-                                                                                        </div>
-
-                                                                                        {components.find(c => c.id === selectedComponentId).config.excelParams ? (
-                                                                                            // Excel Mapping UI
-                                                                                            <>
-                                                                                                <div style={{ fontSize: '0.7rem', color: 'var(--color-primary)', fontWeight: 'bold', marginTop: '4px' }}>MAPPING</div>
-
-                                                                                                {/* Model Property (Reference) */}
-                                                                                                <div>
-                                                                                                    <div style={{ marginBottom: '4px' }}>
-                                                                                                        <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block' }}>MODEL KEY (e.g. Classification)</label>
-                                                                                                    </div>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.excelParams.modelKey || ''}
-                                                                                                        onChange={(e) => {
-                                                                                                            const oldParams = components.find(c => c.id === selectedComponentId).config.excelParams;
-                                                                                                            updateComponentConfig(selectedComponentId, { excelParams: { ...oldParams, modelKey: e.target.value } });
-                                                                                                        }}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                    >
-                                                                                                        <option value="">Select model property...</option>
-                                                                                                        {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-
-                                                                                                {/* Excel Key Column */}
-                                                                                                <div>
-                                                                                                    <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>EXCEL KEY COLUMN</label>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.excelParams.excelKey || ''}
-                                                                                                        onChange={(e) => {
-                                                                                                            const oldParams = components.find(c => c.id === selectedComponentId).config.excelParams;
-                                                                                                            updateComponentConfig(selectedComponentId, { excelParams: { ...oldParams, excelKey: e.target.value } });
-                                                                                                        }}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                    >
-                                                                                                        <option value="">Select Excel column...</option>
-                                                                                                        {(components.find(c => c.id === selectedComponentId).config.excelParams.headers || []).map(h => <option key={h} value={h}>{h}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-
-                                                                                                {/* Excel Activity Name */}
-                                                                                                <div>
-                                                                                                    <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>EXCEL ACTIVITY NAME</label>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.excelParams.excelName || ''}
-                                                                                                        onChange={(e) => {
-                                                                                                            const oldParams = components.find(c => c.id === selectedComponentId).config.excelParams;
-                                                                                                            updateComponentConfig(selectedComponentId, { excelParams: { ...oldParams, excelName: e.target.value } });
-                                                                                                        }}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                    >
-                                                                                                        <option value="">Select Excel column...</option>
-                                                                                                        {(components.find(c => c.id === selectedComponentId).config.excelParams.headers || []).map(h => <option key={h} value={h}>{h}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-
-                                                                                                {/* Excel Start Date */}
-                                                                                                <div>
-                                                                                                    <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>EXCEL START DATE</label>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.excelParams.excelStart || ''}
-                                                                                                        onChange={(e) => {
-                                                                                                            const oldParams = components.find(c => c.id === selectedComponentId).config.excelParams;
-                                                                                                            updateComponentConfig(selectedComponentId, { excelParams: { ...oldParams, excelStart: e.target.value } });
-                                                                                                        }}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                    >
-                                                                                                        <option value="">Select Excel column...</option>
-                                                                                                        {(components.find(c => c.id === selectedComponentId).config.excelParams.headers || []).map(h => <option key={h} value={h}>{h}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-
-                                                                                                {/* Excel End Date */}
-                                                                                                <div>
-                                                                                                    <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>EXCEL END DATE</label>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.excelParams.excelEnd || ''}
-                                                                                                        onChange={(e) => {
-                                                                                                            const oldParams = components.find(c => c.id === selectedComponentId).config.excelParams;
-                                                                                                            updateComponentConfig(selectedComponentId, { excelParams: { ...oldParams, excelEnd: e.target.value } });
-                                                                                                        }}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                    >
-                                                                                                        <option value="">Select Excel column...</option>
-                                                                                                        {(components.find(c => c.id === selectedComponentId).config.excelParams.headers || []).map(h => <option key={h} value={h}>{h}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-                                                                                            </>
-                                                                                        ) : (
-                                                                                            // Fallback to basic model property selection (Legacy)
-                                                                                            <>
-                                                                                                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: '8px' }}>Or configure using model properties directly:</div>
-                                                                                                {/* Activity Name */}
-                                                                                                <div>
-                                                                                                    <div style={{ marginBottom: '4px' }}>
-                                                                                                        <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block' }}>ACTIVITY NAME PROPERTY</label>
-                                                                                                    </div>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.attribute || ''}
-                                                                                                        onChange={(e) => updateComponentConfig(selectedComponentId, { attribute: e.target.value })}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                        disabled={propsLoading}
-                                                                                                    >
-                                                                                                        <option value="">Select property...</option>
-                                                                                                        {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-
-                                                                                                {/* Start Date */}
-                                                                                                <div>
-                                                                                                    <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>START DATE PROPERTY</label>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.startAttribute || ''}
-                                                                                                        onChange={(e) => updateComponentConfig(selectedComponentId, { startAttribute: e.target.value })}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                        disabled={propsLoading}
-                                                                                                    >
-                                                                                                        <option value="">Select property...</option>
-                                                                                                        {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-
-                                                                                                {/* End Date */}
-                                                                                                <div>
-                                                                                                    <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>END DATE PROPERTY</label>
-                                                                                                    <select
-                                                                                                        value={components.find(c => c.id === selectedComponentId).config.endAttribute || ''}
-                                                                                                        onChange={(e) => updateComponentConfig(selectedComponentId, { endAttribute: e.target.value })}
-                                                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                        disabled={propsLoading}
-                                                                                                    >
-                                                                                                        <option value="">Select property...</option>
-                                                                                                        {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                                                    </select>
-                                                                                                </div>
-                                                                                            </>
-                                                                                        )}
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                                                                        <div>
-                                                                                            <div style={{ marginBottom: '4px' }}>
-                                                                                                <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block' }}>
-                                                                                                    {components.find(c => c.id === selectedComponentId).type === 'kpi' ? 'KPI PARAMETER (MODEL/EXCEL)' : 'GROUP BY (LEGEND)'}
-                                                                                                </label>
-                                                                                            </div>
-                                                                                            <select
-                                                                                                value={components.find(c => c.id === selectedComponentId).config.attribute || ''}
-                                                                                                onChange={(e) => updateComponentConfig(selectedComponentId, { attribute: e.target.value })}
-                                                                                                style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                disabled={propsLoading}
-                                                                                            >
-                                                                                                {propsLoading ? (
-                                                                                                    <option>Scanning model properties...</option>
-                                                                                                ) : availableProperties.length > 0 ? (
-                                                                                                    <>
-                                                                                                        <option value="">Select a property...</option>
-                                                                                                        {availableProperties.map(prop => (
-                                                                                                            <option key={prop} value={prop}>{prop}</option>
-                                                                                                        ))}
-                                                                                                    </>
-                                                                                                ) : (
-                                                                                                    <option>Generic Properties Only / Retry Scan</option>
-                                                                                                )}
-                                                                                            </select>
-                                                                                        </div>
-
-                                                                                        {components.find(c => c.id === selectedComponentId).type === 'kpi' && (
-                                                                                            <div>
-                                                                                                <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>TEXT SIZE</label>
-                                                                                                <select
-                                                                                                    value={components.find(c => c.id === selectedComponentId).config.fontSize || '4xl'}
-                                                                                                    onChange={(e) => updateComponentConfig(selectedComponentId, { fontSize: e.target.value })}
-                                                                                                    style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                >
-                                                                                                    <option value="xs">Extra Small</option>
-                                                                                                    <option value="sm">Small</option>
-                                                                                                    <option value="base">Medium</option>
-                                                                                                    <option value="lg">Large</option>
-                                                                                                    <option value="xl">Extra Large</option>
-                                                                                                    <option value="2xl">2XL</option>
-                                                                                                    <option value="3xl">3XL</option>
-                                                                                                    <option value="4xl">4XL (Default)</option>
-                                                                                                    <option value="5xl">5XL</option>
-                                                                                                    <option value="6xl">6XL</option>
-                                                                                                </select>
-                                                                                            </div>
-                                                                                        )}
-
-                                                                                        <div>
-                                                                                            <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>AGGREGATION TYPE</label>
-                                                                                            <div style={{ display: 'flex', gap: '8px' }}>
-                                                                                                {['count', 'sum'].map(method => (
-                                                                                                    <button
-                                                                                                        key={method}
-                                                                                                        onClick={() => updateComponentConfig(selectedComponentId, { aggregationType: method })}
-                                                                                                        style={{
-                                                                                                            flex: 1,
-                                                                                                            padding: '8px',
-                                                                                                            background: components.find(c => c.id === selectedComponentId).config.aggregationType === method ? 'var(--color-primary)' : 'var(--color-bg-base)',
-                                                                                                            color: components.find(c => c.id === selectedComponentId).config.aggregationType === method ? 'black' : 'var(--color-text-base)',
-                                                                                                            border: '1px solid var(--color-border)',
-                                                                                                            borderRadius: '4px',
-                                                                                                            fontSize: '11px',
-                                                                                                            fontWeight: '600',
-                                                                                                            cursor: 'pointer',
-                                                                                                            textTransform: 'uppercase'
-                                                                                                        }}
-                                                                                                    >
-                                                                                                        {method}
-                                                                                                    </button>
-                                                                                                ))}
-                                                                                            </div>
-                                                                                        </div>
-
-                                                                                        {components.find(c => c.id === selectedComponentId).config.aggregationType === 'sum' && (
-                                                                                            <div>
-                                                                                                <label style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>SUM PROPERTY (AREA/VOLUME/COST)</label>
-                                                                                                <select
-                                                                                                    value={components.find(c => c.id === selectedComponentId).config.sumAttribute || ''}
-                                                                                                    onChange={(e) => updateComponentConfig(selectedComponentId, { sumAttribute: e.target.value })}
-                                                                                                    style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
-                                                                                                    disabled={propsLoading}
-                                                                                                >
-                                                                                                    {propsLoading ? (
-                                                                                                        <option>Scanning for numeric properties...</option>
-                                                                                                    ) : availableProperties.length > 0 ? (
-                                                                                                        <>
-                                                                                                            <option value="">Select numeric property...</option>
-                                                                                                            {availableProperties.map(prop => (
-                                                                                                                <option key={prop} value={prop}>{prop}</option>
-                                                                                                            ))}
-                                                                                                        </>
-                                                                                                    ) : (
-                                                                                                        <option>Scan Needed / Retry</option>
-                                                                                                    )}
-                                                                                                </select>
-                                                                                            </div>
-                                                                                        )}
-
-                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px', background: 'rgba(29, 185, 84, 0.1)', borderRadius: '4px', border: '1px solid rgba(29, 185, 84, 0.3)' }}>
-                                                                                            <input
-                                                                                                type="checkbox"
-                                                                                                id="applyColors"
-                                                                                                checked={components.find(c => c.id === selectedComponentId).config.applyColorsToModel || false}
-                                                                                                onChange={(e) => updateComponentConfig(selectedComponentId, { applyColorsToModel: e.target.checked })}
-                                                                                                style={{ width: '16px', height: '16px', accentColor: 'var(--color-primary)' }}
-                                                                                            />
-                                                                                            <label htmlFor="applyColors" style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-base)', cursor: 'pointer' }}>
-                                                                                                🎨 SYNC COLORS TO MODEL
-                                                                                            </label>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-
-                                                                            <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
-                                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                                                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>FILTERS</label>
-                                                                                    <button
-                                                                                        onClick={() => addFilter(selectedComponentId)}
-                                                                                        className="btn btn-secondary"
-                                                                                        style={{ padding: '4px 8px', fontSize: '10px' }}
-                                                                                    >
-                                                                                        + ADD FILTER
-                                                                                    </button>
-                                                                                </div>
-
-                                                                                {(components.find(c => c.id === selectedComponentId).config.filters || []).length > 0 && (
-                                                                                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                                                                                        <button
-                                                                                            onClick={() => updateComponentConfig(selectedComponentId, { logicalOperator: 'AND' })}
-                                                                                            style={{
-                                                                                                flex: 1, padding: '4px', fontSize: '10px', borderRadius: '4px', border: '1px solid var(--color-border)',
-                                                                                                background: components.find(c => c.id === selectedComponentId).config.logicalOperator !== 'OR' ? 'var(--color-primary)' : 'transparent'
-                                                                                            }}
-                                                                                        >AND</button>
-                                                                                        <button
-                                                                                            onClick={() => updateComponentConfig(selectedComponentId, { logicalOperator: 'OR' })}
-                                                                                            style={{
-                                                                                                flex: 1, padding: '4px', fontSize: '10px', borderRadius: '4px', border: '1px solid var(--color-border)',
-                                                                                                background: components.find(c => c.id === selectedComponentId).config.logicalOperator === 'OR' ? 'var(--color-primary)' : 'transparent'
-                                                                                            }}
-                                                                                        >OR</button>
-                                                                                    </div>
-                                                                                )}
-
-                                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                                                    {(components.find(c => c.id === selectedComponentId).config.filters || []).map((filter, idx) => (
-                                                                                        <div key={idx} style={{ background: 'var(--color-bg-base)', padding: '8px', borderRadius: '4px', border: '1px solid var(--color-border)', position: 'relative' }}>
-                                                                                            <button
-                                                                                                onClick={() => removeFilter(selectedComponentId, idx)}
-                                                                                                style={{ position: 'absolute', top: '2px', right: '2px', background: 'transparent', border: 'none', color: '#ff4444', cursor: 'pointer' }}
-                                                                                            >×</button>
-
-                                                                                            <select
-                                                                                                value={filter.attribute}
-                                                                                                onChange={(e) => updateFilter(selectedComponentId, idx, { attribute: e.target.value })}
-                                                                                                style={{ width: '100%', marginBottom: '4px', fontSize: '11px', background: 'transparent', color: 'var(--color-text-base)', border: 'none' }}
-                                                                                            >
-                                                                                                <option value="">Property...</option>
-                                                                                                {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                                            </select>
-
-                                                                                            <div style={{ display: 'flex', gap: '4px' }}>
-                                                                                                <select
-                                                                                                    value={filter.operator}
-                                                                                                    onChange={(e) => updateFilter(selectedComponentId, idx, { operator: e.target.value })}
-                                                                                                    style={{ flex: 1, fontSize: '10px', background: 'transparent', color: 'var(--color-text-base)', border: 'none' }}
-                                                                                                >
-                                                                                                    <option value="equals">Equals</option>
-                                                                                                    <option value="contains">Contains</option>
-                                                                                                    <option value="not_equals">≠</option>
-                                                                                                </select>
-                                                                                                <input
-                                                                                                    type="text"
-                                                                                                    value={filter.value}
-                                                                                                    onChange={(e) => updateFilter(selectedComponentId, idx, { value: e.target.value })}
-                                                                                                    placeholder="Value..."
-                                                                                                    style={{ flex: 2, fontSize: '10px', background: 'transparent', color: 'var(--color-text-base)', border: 'none', borderBottom: '1px solid var(--color-border)' }}
-                                                                                                />
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    ))}
-                                                                                </div>
-                                                                            </div>
-                                                                        </>
-                                                                    )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {/* Resize Handle */}
-                                                {!settingsCollapsed && !isSettingsDocked && (
-                                                    <div
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation();
-                                                            resizingRef.current = 'settings';
-                                                            document.body.style.cursor = 'nwse-resize';
-                                                        }}
-                                                        className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize flex items-end justify-end p-0.5 opacity-50 hover:opacity-100"
-                                                        style={{ zIndex: 60 }}
-                                                    >
-                                                        <div className="w-full h-full border-b-2 border-r-2 border-[var(--color-text-muted)] rounded-br-sm" />
-                                                    </div>
-                                                )}
-                                            </motion.div>
-                                        </Draggable>
-                                    )
-                                )}
-                            </AnimatePresence>
-                        </div>
-
-                        {/* Main Canvas Expand to full width */}
+                    <div className={`w-full ${isFullScreen ? 'h-full' : 'h-[calc(100vh-140px)]'} visible opacity-100 overflow-hidden flex flex-col`}>
+                        {/* Header Section (Info + Warnings) */}
                         <div style={{
-                            flex: 1,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 'var(--spacing-md)',
-                            zIndex: 1,
-                            minHeight: 0
+                            padding: '20px 40px 10px 40px',
+                            background: 'var(--color-bg-base)',
+                            borderBottom: '1px solid var(--color-border)',
+                            zIndex: 120, // Keep header above panels if needed
+                            position: 'relative'
                         }}>
                             {/* Dashboard Info */}
                             <div
@@ -1400,21 +746,50 @@ const DashboardBuilder = () => {
 
                                 {/* Header Right Actions */}
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                    {/* Clear Filters Button */}
+                                    <button
+                                        onClick={() => {
+                                            setCurrentSelection([]);
+                                            setTimelineDate(null); // Stop 4D Timeline
+                                            if (viewer) {
+                                                viewer.clearSelection();
+                                                viewer.showAll();
+                                            }
+                                        }}
+                                        className="btn btn-secondary"
+                                        style={{
+                                            padding: '6px 12px',
+                                            background: currentSelection.length > 0 ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
+                                            borderColor: currentSelection.length > 0 ? 'rgba(239, 68, 68, 0.3)' : 'var(--color-border)',
+                                            color: currentSelection.length > 0 ? '#ef4444' : 'var(--color-text-muted)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            fontSize: '11px',
+                                            fontWeight: '600',
+                                            transition: 'all 0.2s'
+                                        }}
+                                        title="Clear all filters and selections"
+                                    >
+                                        <X className="w-3 h-3" />
+                                        CLEAR
+                                    </button>
+
                                     {/* Interaction Sync Toggle */}
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', background: 'var(--color-bg-base)', borderRadius: '20px', border: '1px solid var(--color-border)' }}>
-                                        <label style={{ fontSize: '12px', fontWeight: '600', color: interactionSync ? 'var(--color-primary)' : 'var(--color-text-muted)', cursor: 'pointer' }}>
+                                        <label style={{ fontSize: '12px', fontWeight: '600', color: globalSync ? 'var(--color-primary)' : 'var(--color-text-muted)', cursor: 'pointer' }}>
                                             ⚡ SYNC
                                         </label>
                                         <div
                                             onClick={() => {
-                                                const newState = !interactionSync;
-                                                setInteractionSync(newState);
+                                                const newState = !globalSync;
+                                                setGlobalSync(newState);
                                                 if (!newState) setCurrentSelection([]); // Clear selection when turning off
                                             }}
                                             style={{
                                                 width: '32px',
                                                 height: '18px',
-                                                background: interactionSync ? 'var(--color-primary)' : 'var(--color-bg-base)',
+                                                background: globalSync ? 'var(--color-primary)' : 'var(--color-bg-base)',
                                                 borderRadius: '10px',
                                                 position: 'relative',
                                                 cursor: 'pointer',
@@ -1429,14 +804,64 @@ const DashboardBuilder = () => {
                                                 borderRadius: '50%',
                                                 position: 'absolute',
                                                 top: '1px',
-                                                left: interactionSync ? '15px' : '1px',
+                                                left: globalSync ? '15px' : '1px',
                                                 transition: 'all 0.2s'
                                             }} />
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', gap: 'var(--spacing-md)', flexShrink: 0 }}>
                                         <button
-                                            onClick={() => exportUtils.downloadDashboard({ name: dashboardName, description: dashboardDescription, projectData, components, layout })}
+                                            onClick={() => {
+                                                // Pre-calculate data snapshots for export
+                                                const componentData = {};
+
+                                                components.forEach(comp => {
+                                                    try {
+                                                        const config = comp.config || {};
+                                                        const attribute = config.attribute || 'Category';
+
+                                                        if (['pie', 'bar', 'line', 'table', 'kpi'].includes(comp.type)) {
+                                                            let result;
+
+                                                            if (masterData && masterData.length > 0) {
+                                                                // Use Master Data (Offline-ready)
+                                                                const aggType = config.aggregationType || 'count';
+                                                                const sumAttr = aggType === 'sum' ? (config.sumAttribute || null) : null;
+                                                                const filters = config.filters || [];
+                                                                const operator = config.logicalOperator || 'AND';
+
+                                                                // Calculate correct value for KPI vs Charts
+                                                                if (comp.type === 'kpi') {
+                                                                    const res = analyticsService.aggregateFromMasterData(masterData, attribute, filters, operator, sumAttr, currentSelection);
+                                                                    // KPI usually wants total count or specific value. aggregateFromMasterData returns { labels, values }
+                                                                    // For KPI, we often want total of values or just count of matches
+                                                                    const total = res.values.reduce((a, b) => a + b, 0);
+                                                                    result = { value: total.toLocaleString(), label: attribute };
+                                                                } else {
+                                                                    result = analyticsService.aggregateFromMasterData(masterData, attribute, filters, operator, sumAttr, currentSelection);
+                                                                }
+                                                            } else {
+                                                                // Fallback if no masterData (empty or loading)
+                                                                result = null;
+                                                            }
+
+                                                            if (result) {
+                                                                componentData[comp.id] = result;
+                                                            }
+                                                        }
+                                                    } catch (err) {
+                                                        console.error('Error calculating export data for', comp.id, err);
+                                                    }
+                                                });
+
+                                                exportUtils.downloadDashboard({
+                                                    name: dashboardName,
+                                                    description: dashboardDescription,
+                                                    projectData,
+                                                    components,
+                                                    layout
+                                                }, componentData); // Pass snapshot
+                                            }}
                                             className="btn btn-secondary"
                                         >
                                             <span>
@@ -1460,13 +885,13 @@ const DashboardBuilder = () => {
                                         </button>
                                     </div>
                                 </div>
-                            </div >
+                            </div>
 
                             {/* Unmapped Sources Warning */}
                             {
                                 projectData.sources && Object.values(projectData.sources).some(s => !s.mapping?.modelKey || !s.mapping?.fileKey) && (
                                     <div style={{
-                                        margin: '0 var(--spacing-lg) var(--spacing-sm)',
+                                        margin: '10px 0 0 0',
                                         padding: '10px 16px',
                                         background: 'rgba(245, 158, 11, 0.1)',
                                         border: '1px solid rgba(245, 158, 11, 0.3)',
@@ -1487,243 +912,650 @@ const DashboardBuilder = () => {
                                     </div>
                                 )
                             }
-
-
-
-                            {/* Grid Canvas */}
-                            <div
-                                ref={canvasRef}
-                                className="bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed"
-                                style={{
-                                    flex: 1,
-                                    overflowY: 'auto',
-                                    overflowX: 'hidden',
-                                    background: 'var(--color-bg-elevated)',
-                                    border: '1px solid var(--color-border)',
-                                    borderRadius: 'var(--radius-md)',
-                                    padding: 'var(--spacing-md)',
-                                    position: 'relative',
-                                    zIndex: 10
-                                }}>
-                                {components.length === 0 ? (
-                                    <div
-                                        style={{
-                                            height: '100%',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            textAlign: 'center',
-                                            color: 'var(--color-text-base)',
-                                            opacity: 1,
-                                            visibility: 'visible'
-                                        }}
-                                    >
-                                        <div style={{ fontSize: '64px', marginBottom: 'var(--spacing-lg)' }}>
-                                            📊
-                                        </div>
-                                        <h3 style={{
-                                            fontSize: 'var(--font-size-xl)',
-                                            fontWeight: 'var(--font-weight-bold)',
-                                            marginBottom: 'var(--spacing-sm)',
-                                            color: 'var(--color-text-base)'
-                                        }}>
-                                            Start Building Your Dashboard
-                                        </h3>
-                                        <p style={{ fontSize: 'var(--font-size-sm)' }}>
-                                            Add components from the palette • Drag to arrange • Resize as needed
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <GridLayout
-                                        className="layout"
-                                        layout={layout}
-                                        cols={12}
-                                        rowHeight={80}
-                                        width={canvasWidth}
-                                        onLayoutChange={(newLayout) => setLayout(newLayout)}
-                                        draggableHandle=".drag-handle"
-                                        style={{
-                                            minHeight: '600px'
-                                        }}
-                                    >
-                                        {components.map((comp) => (
-                                            <div
-                                                key={comp.id}
-                                                style={{
-                                                    background: 'var(--color-bg-base)',
-                                                    borderRadius: 'var(--radius-md)',
-                                                    overflow: 'hidden',
-                                                    position: 'relative',
-                                                    border: '1px solid var(--color-border)',
-                                                    boxShadow: selectedComponentId === comp.id ? '0 0 0 2px var(--color-primary)' : 'none'
-                                                }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setSelectedComponentId(comp.id);
-                                                }}
-                                            >
-                                                {/* Drag Handle */}
-                                                <div
-                                                    className="drag-handle"
-                                                    style={{
-                                                        position: 'absolute',
-                                                        top: 0,
-                                                        left: 0,
-                                                        right: 0,
-                                                        height: '24px',
-                                                        background: 'var(--color-bg-highlight)',
-                                                        cursor: 'grab',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        opacity: 0,
-                                                        transition: 'opacity 0.2s',
-                                                        zIndex: 10
-                                                    }}
-                                                    onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                                                    onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
-                                                >
-                                                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Drag to move</span>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            removeComponent(comp.id);
-                                                        }}
-                                                        style={{
-                                                            position: 'absolute',
-                                                            right: '4px',
-                                                            background: 'transparent',
-                                                            border: 'none',
-                                                            color: '#ff4444',
-                                                            cursor: 'pointer',
-                                                            fontSize: '14px'
-                                                        }}
-                                                    >×</button>
-                                                </div>
-
-                                                <div style={{ height: '100%', overflow: 'hidden' }}>
-                                                    {renderComponent(comp)}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </GridLayout>
-                                )}
-                            </div>
                         </div>
 
-                        {/* File Explorer Modal */}
-                        <AnimatePresence>
-                            {showFileExplorer && (
-                                <div style={{
-                                    position: 'fixed',
-                                    inset: 0,
-                                    background: 'rgba(0,0,0,0.8)',
-                                    backdropFilter: 'blur(4px)',
-                                    zIndex: 1000,
+                        {/* Main Content Area (Panels + Canvas) */}
+                        <div className="flex-1 relative flex overflow-hidden">
+                            {/* 1. Left Sidebar (Palette) */}
+                            <div
+                                style={{
+                                    width: paletteCollapsed ? '0px' : `${paletteWidth}px`,
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    borderRight: paletteCollapsed ? 'none' : '1px solid var(--color-border)',
+                                    background: 'var(--color-bg-base)',
                                     display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center'
-                                }}>
-                                    <div
-                                        style={{
-                                            width: '80%',
-                                            height: '80%',
-                                            background: 'var(--color-bg-elevated)',
-                                            borderRadius: 'var(--radius-lg)',
-                                            overflow: 'hidden',
-                                            display: 'flex',
-                                            flexDirection: 'column'
-                                        }}
-                                    >
-                                        <div style={{
-                                            padding: 'var(--spacing-md)',
-                                            borderBottom: '1px solid var(--color-border)',
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center'
-                                        }}>
-                                            <h3>Select 3D Model</h3>
-                                            <button onClick={() => setShowFileExplorer(false)} className="btn-icon">×</button>
-                                        </div>
-                                        <div style={{ flex: 1, overflow: 'auto' }}>
-                                            <FileExplorer
-                                                onSelect={async (selection) => {
-                                                    if (fileExplorerTarget === 'viewer') {
-                                                        // Handle the structure returned by FileExplorer: { project, model, modelUrn }
-                                                        setProjectData(prev => ({
-                                                            ...prev,
-                                                            model: {
-                                                                urn: selection.modelUrn,
-                                                                name: selection.model.name,
-                                                                projectName: selection.project.name || 'Unknown Project'
-                                                            }
-                                                        }));
-                                                        setModelLoaded(false);
-                                                        setAvailableProperties([]);
-                                                        setShowFileExplorer(false);
-                                                    } else {
-                                                        // Target is a component (e.g. Schedule) expecting an Excel file
-                                                        if (selection.model.name.endsWith('.xlsx')) {
-                                                            try {
-                                                                console.log('Fetching Excel file...', selection.model.name);
-                                                                console.log('Target Component ID:', fileExplorerTarget);
+                                    position: 'absolute',
+                                    left: 0,
+                                    top: 0,
+                                    bottom: 0,
+                                    zIndex: 110,
+                                    boxShadow: paletteCollapsed ? 'none' : '4px 0 16px rgba(0,0,0,0.2)',
+                                    overflow: 'visible'
+                                }}
+                            >
+                                <div style={{ flex: 1, overflow: 'hidden', opacity: paletteCollapsed ? 0 : 1, transition: 'opacity 0.2s' }}>
+                                    <div style={{ padding: '0px', display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                        <DataSourcesPanel
+                                            projectData={projectData}
+                                            onUpdateProjectData={(newData) => {
+                                                console.log('[Builder] Updating project data from panel', newData);
+                                                setProjectData(newData);
+                                            }}
+                                            viewer={viewer}
+                                            onPropertiesLoaded={setAvailableProperties}
+                                            hasViewerComponent={components.some(c => c.type === 'viewer')}
+                                            onRefreshAll={handleSaveData}
+                                            isRefreshing={isRefreshing}
+                                            availableProperties={availableProperties}
+                                            isCollapsed={false}
+                                            masterData={masterData}
+                                            modelLoaded={modelLoaded} // Pass model status for auto-scanning
+                                        />
 
-                                                                // Use the raw URN (Version ID) and Project ID
-                                                                const buffer = await analyticsService.apsService.getFileContent(
-                                                                    selection.model.projectId,
-                                                                    selection.model.urn // Version ID
-                                                                );
+                                        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                            <h3 className="text-sm font-semibold text-[var(--color-text-base)] uppercase tracking-widest mb-0">
+                                                Components
+                                            </h3>
 
-                                                                const workbook = XLSX.read(buffer, { type: 'array' });
-                                                                const sheetName = workbook.SheetNames[0];
-                                                                const worksheet = workbook.Sheets[sheetName];
-                                                                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                                            <div className="flex flex-col gap-2 flex-1 overflow-y-auto pr-1">
+                                                <div className="flex flex-col gap-2">
+                                                    {componentTypes.map((compType) => {
+                                                        const Icon = compType.icon;
+                                                        return (
+                                                            <button
+                                                                key={compType.type}
+                                                                onClick={() => addComponent(compType.type)}
+                                                                className="rounded-lg cursor-pointer flex items-center gap-3 text-sm font-medium transition-all justify-start p-3 border border-transparent hover:border-[var(--color-border)] bg-[var(--color-bg-elevated)] hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]"
+                                                            >
+                                                                <Icon className="w-5 h-5" />
+                                                                <span>{compType.label}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
 
-                                                                if (jsonData && jsonData.length > 0) {
-                                                                    const headers = jsonData[0];
-                                                                    console.log('Excel Headers:', headers);
-
-                                                                    // Update the component config
-                                                                    updateComponentConfig(fileExplorerTarget, {
-                                                                        excelParams: {
-                                                                            fileName: selection.model.name,
-                                                                            urn: selection.model.urn,
-                                                                            projectId: selection.model.projectId,
-                                                                            headers: headers,
-                                                                            // Initialize mappings
-                                                                            modelKey: '',
-                                                                            excelKey: '',
-                                                                            excelName: '',
-                                                                            excelStart: '',
-                                                                            excelEnd: ''
-                                                                        }
-                                                                    });
-                                                                } else {
-                                                                    alert('Excel file appears strictly empty or invalid.');
-                                                                }
-
-                                                            } catch (error) {
-                                                                console.error("Error processing Excel file:", error);
-                                                                alert("Failed to download or parse Excel file. See console.");
-                                                            }
-                                                            setShowFileExplorer(false);
-                                                        } else {
-                                                            alert("Please select a valid .xlsx file.");
-                                                            // Do NOT close explorer
-                                                        }
-                                                    }
-                                                }}
-                                            />
+                                                <div className="mt-auto p-3 bg-[var(--color-bg-elevated)] rounded-lg text-xs text-[var(--color-text-muted)] leading-relaxed border border-[var(--color-border)]">
+                                                    💡 Click to add • Drag to move • Resize from corners
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            )}
-                        </AnimatePresence >
-                    </div >
+
+                                {/* Resize Handle (Left) */}
+                                {!paletteCollapsed && (
+                                    <div
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            resizingRef.current = 'palette';
+                                            document.body.style.cursor = 'ew-resize';
+                                        }}
+                                        style={{
+                                            position: 'absolute',
+                                            right: '0',
+                                            top: 0,
+                                            bottom: 0,
+                                            width: '4px',
+                                            cursor: 'ew-resize',
+                                            zIndex: 102,
+                                            transition: 'background 0.2s',
+                                            background: 'transparent'
+                                        }}
+                                        className="hover:bg-[var(--color-primary)] opacity-30"
+                                    />
+                                )}
+
+                                {/* Collapse Toggle Arrow (Left) */}
+                                <button
+                                    onClick={() => setPaletteCollapsed(!paletteCollapsed)}
+                                    style={{
+                                        position: 'absolute',
+                                        right: paletteCollapsed ? '-12px' : '-12px',
+                                        left: paletteCollapsed ? '0px' : 'auto',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        width: '24px',
+                                        height: '24px',
+                                        borderRadius: '50%',
+                                        background: 'var(--color-bg-base)',
+                                        border: '1px solid var(--color-border)',
+                                        color: 'var(--color-text-base)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        zIndex: 103,
+                                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                                    }}
+                                >
+                                    {paletteCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+                                </button>
+                            </div>
+
+                            {/* Middle Content (Canvas) */}
+                            <div style={{
+                                flex: 1,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                minWidth: 0,
+                                paddingLeft: '0px',
+                                paddingRight: '0px',
+                                transition: 'padding 0.3s ease'
+                            }}>
+                                {/* Grid Canvas */}
+                                <div
+                                    ref={canvasRef}
+                                    className="bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed"
+                                    style={{
+                                        flex: 1,
+                                        overflowY: 'auto',
+                                        overflowX: 'hidden',
+                                        background: 'var(--color-bg-elevated)',
+                                        border: '1px solid var(--color-border)',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: 'var(--spacing-md)',
+                                        position: 'relative',
+                                        zIndex: 10,
+                                        margin: '20px 40px' // Restore some margin for the grid area
+                                    }}>
+                                    {components.length === 0 ? (
+                                        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
+                                            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
+                                            <h3 className="text-xl font-bold mb-2">Start Building Your Dashboard</h3>
+                                            <p>Add components from the palette • Drag to arrange • Resize as needed</p>
+                                        </div>
+                                    ) : (
+                                        <GridLayout
+                                            className="layout"
+                                            layout={layout}
+                                            cols={12}
+                                            rowHeight={80}
+                                            width={canvasWidth}
+                                            onLayoutChange={(newLayout) => setLayout(newLayout)}
+                                            draggableHandle=".drag-handle"
+                                            margin={[20, 20]}
+                                        >
+                                            {components.map((comp) => (
+                                                <div
+                                                    key={comp.id}
+                                                    style={{
+                                                        background: 'var(--color-bg-base)',
+                                                        borderRadius: 'var(--radius-md)',
+                                                        overflow: 'hidden',
+                                                        position: 'relative',
+                                                        border: '1px solid var(--color-border)',
+                                                        boxShadow: selectedComponentId === comp.id ? '0 0 0 2px var(--color-primary)' : 'none'
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedComponentId(comp.id);
+                                                    }}
+                                                >
+                                                    {/* Drag Handle */}
+                                                    <div
+                                                        className="drag-handle opacity-0 hover:opacity-100 transition-opacity"
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: 0,
+                                                            left: 0,
+                                                            right: 0,
+                                                            height: '24px',
+                                                            background: 'var(--color-bg-highlight)',
+                                                            cursor: 'grab',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            zIndex: 10
+                                                        }}
+                                                    >
+                                                        <GripHorizontal className="w-4 h-4 text-[var(--color-text-muted)]" />
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                removeComponent(comp.id);
+                                                            }}
+                                                            className="absolute right-1 p-0.5 hover:bg-red-500/20 rounded transition-colors text-red-500"
+                                                        >
+                                                            <X size={14} />
+                                                        </button>
+                                                    </div>
+
+                                                    <div style={{ height: '100%', padding: '0', overflow: 'hidden' }}>
+                                                        {renderComponent(comp)}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </GridLayout>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Right Sidebar (Settings) */}
+                            <div
+                                style={{
+                                    width: (settingsCollapsed || !selectedComponentId) ? '0px' : `${settingsWidth}px`,
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    borderLeft: (settingsCollapsed || !selectedComponentId) ? 'none' : '1px solid var(--color-border)',
+                                    background: 'var(--color-bg-base)',
+                                    display: 'flex',
+                                    position: 'absolute',
+                                    right: 0,
+                                    top: 0,
+                                    bottom: 0,
+                                    zIndex: 110,
+                                    boxShadow: settingsCollapsed ? 'none' : '-4px 0 16px rgba(0,0,0,0.2)',
+                                    overflow: 'visible'
+                                }}
+                            >
+                                {/* Resize Handle (Right) */}
+                                {selectedComponentId && !settingsCollapsed && (
+                                    <div
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            resizingRef.current = 'settings';
+                                            document.body.style.cursor = 'ew-resize';
+                                        }}
+                                        style={{
+                                            position: 'absolute',
+                                            left: '0',
+                                            top: 0,
+                                            bottom: 0,
+                                            width: '4px',
+                                            cursor: 'ew-resize',
+                                            zIndex: 102,
+                                            transition: 'background 0.2s',
+                                            background: 'transparent'
+                                        }}
+                                        className="hover:bg-[var(--color-primary)] opacity-30"
+                                    />
+                                )}
+                                <div style={{ flex: 1, overflow: 'hidden', opacity: (settingsCollapsed || !selectedComponentId) ? 0 : 1, transition: 'opacity 0.2s' }}>
+                                    {selectedComponentId && (
+                                        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <h3 className="text-sm font-semibold text-[var(--color-text-base)] uppercase tracking-widest">Settings</h3>
+                                                <button onClick={() => setSelectedComponentId(null)} className="p-1 hover:bg-[var(--color-hover)] rounded transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]">
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
+
+                                            <div style={{ flex: 1, overflowY: 'auto' }}>
+                                                {/* Settings Content (Reused from previous implementation) */}
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                                    <div>
+                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>WIDGET TITLE</label>
+                                                        <input
+                                                            type="text"
+                                                            value={components.find(c => c.id === selectedComponentId)?.config.title || ''}
+                                                            onChange={(e) => updateComponentConfig(selectedComponentId, { title: e.target.value })}
+                                                            style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
+                                                        />
+                                                    </div>
+
+                                                    {/* Other simplified settings components here... using current logic */}
+                                                    {['pie', 'bar', 'kpi', 'table', 'schedule'].includes(components.find(c => c.id === selectedComponentId)?.type) && (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                                            {/* Attribute Picker, Filters, etc. - reused */}
+                                                            {/* Standard Attribute Picker for Single-Value Charts */}
+                                                            {['pie', 'bar', 'kpi'].includes(components.find(c => c.id === selectedComponentId)?.type) && (
+                                                                <div>
+                                                                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>DATA ATTRIBUTE</label>
+                                                                    <select
+                                                                        value={components.find(c => c.id === selectedComponentId)?.config.attribute || ''}
+                                                                        onChange={(e) => updateComponentConfig(selectedComponentId, { attribute: e.target.value })}
+                                                                        style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
+                                                                    >
+                                                                        <option value="">Select property...</option>
+                                                                        {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Global Sync Settings for all charts */}
+                                                            <div className="flex flex-col gap-3 p-3 bg-white/5 rounded-lg border border-white/10">
+                                                                <div className="flex flex-col gap-1.5 border-l-2 border-lime-400/30 pl-3">
+                                                                    <label className="text-[10px] text-lime-400 uppercase font-bold">Timeline Sync Property</label>
+                                                                    <select
+                                                                        value={components.find(c => c.id === selectedComponentId)?.config.timelineDateAttribute || ''}
+                                                                        onChange={(e) => updateComponentConfig(selectedComponentId, { timelineDateAttribute: e.target.value })}
+                                                                        className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white focus:border-lime-400/50 outline-none"
+                                                                    >
+                                                                        <option value="">Auto-detect...</option>
+                                                                        {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                    </select>
+                                                                    <p className="text-[9px] text-white/40 italic">When Global SYNC is ON, this widget will filter by this date property.</p>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Table Settings: Multi-Column Picker */}
+                                                            {components.find(c => c.id === selectedComponentId)?.type === 'table' && (
+                                                                <div className="flex flex-col gap-2">
+                                                                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block' }}>COLUMNS</label>
+                                                                    <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-md max-h-40 overflow-y-auto p-2">
+                                                                        {availableProperties.map(p => {
+                                                                            const currentAttrs = components.find(c => c.id === selectedComponentId)?.config.attributes || [];
+                                                                            const isChecked = currentAttrs.includes(p);
+                                                                            return (
+                                                                                <label key={p} className="flex items-center gap-2 p-1 hover:bg-[var(--color-hover)] rounded cursor-pointer text-xs text-[var(--color-text-base)]">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={isChecked}
+                                                                                        onChange={(e) => {
+                                                                                            const newAttrs = e.target.checked
+                                                                                                ? [...currentAttrs, p]
+                                                                                                : currentAttrs.filter(a => a !== p);
+                                                                                            updateComponentConfig(selectedComponentId, { attributes: newAttrs });
+                                                                                        }}
+                                                                                        className="accent-[var(--color-primary)]"
+                                                                                    />
+                                                                                    {p}
+                                                                                </label>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                    <p className="text-[10px] text-[var(--color-text-muted)]">Select columns to display in the table.</p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Schedule Settings: Start/End Dates */}
+                                                            {components.find(c => c.id === selectedComponentId)?.type === 'schedule' && (
+                                                                <div className="flex flex-col gap-4">
+                                                                    <div>
+                                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>ACTIVITY NAME</label>
+                                                                        <select
+                                                                            value={components.find(c => c.id === selectedComponentId)?.config.activityNameAttribute || ''}
+                                                                            onChange={(e) => updateComponentConfig(selectedComponentId, { activityNameAttribute: e.target.value })}
+                                                                            style={{ width: '100%', padding: '8px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--color-text-base)' }}
+                                                                        >
+                                                                            <option value="">(Optional) Select ID/Name...</option>
+                                                                            {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                        </select>
+                                                                    </div>
+                                                                    <div>
+                                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>START DATE</label>
+                                                                        <select
+                                                                            value={components.find(c => c.id === selectedComponentId)?.config.startDateAttribute || ''}
+                                                                            onChange={(e) => updateComponentConfig(selectedComponentId, { startDateAttribute: e.target.value })}
+                                                                            style={{ width: '100%', padding: '8px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--color-text-base)' }}
+                                                                        >
+                                                                            <option value="">Select start date...</option>
+                                                                            {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                        </select>
+                                                                    </div>
+                                                                    <div>
+                                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>END DATE</label>
+                                                                        <select
+                                                                            value={components.find(c => c.id === selectedComponentId)?.config.endDateAttribute || ''}
+                                                                            onChange={(e) => updateComponentConfig(selectedComponentId, { endDateAttribute: e.target.value })}
+                                                                            style={{ width: '100%', padding: '8px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--color-text-base)' }}
+                                                                        >
+                                                                            <option value="">Select end date...</option>
+                                                                            {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                        </select>
+                                                                    </div>
+                                                                    <div>
+                                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '6px' }}>PROGRESS %</label>
+                                                                        <select
+                                                                            value={components.find(c => c.id === selectedComponentId)?.config.progressAttribute || ''}
+                                                                            onChange={(e) => updateComponentConfig(selectedComponentId, { progressAttribute: e.target.value })}
+                                                                            style={{ width: '100%', padding: '8px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--color-text-base)' }}
+                                                                        >
+                                                                            <option value="">(Optional) Select progress...</option>
+                                                                            {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Aggregation Selector for KPI */}
+                                                            {components.find(c => c.id === selectedComponentId)?.type === 'kpi' && (
+                                                                <div>
+                                                                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>AGGREGATION</label>
+                                                                    <div className="flex bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-md p-1">
+                                                                        {['count', 'sum'].map(type => {
+                                                                            const currentType = components.find(c => c.id === selectedComponentId)?.config.aggregationType || 'count';
+                                                                            const isActive = currentType === type;
+                                                                            return (
+                                                                                <button
+                                                                                    key={type}
+                                                                                    onClick={() => updateComponentConfig(selectedComponentId, { aggregationType: type })}
+                                                                                    className={`flex-1 py-1.5 text-xs font-semibold rounded uppercase tracking-wider transition-all ${isActive ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]'}`}
+                                                                                >
+                                                                                    {type}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {/* Add more setting controls as needed based on old logic */}
+                                                            <div>
+                                                                <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>DISPLAY FORMAT</label>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => {
+                                                                    const current = components.find(c => c.id === selectedComponentId)?.config.exact;
+                                                                    updateComponentConfig(selectedComponentId, { exact: current === undefined ? false : !current });
+                                                                }}>
+                                                                    <div style={{
+                                                                        width: '32px',
+                                                                        height: '18px',
+                                                                        borderRadius: '9px',
+                                                                        background: (components.find(c => c.id === selectedComponentId)?.config.exact !== false) ? 'var(--color-primary)' : '#555',
+                                                                        position: 'relative',
+                                                                        transition: 'background 0.2s'
+                                                                    }}>
+                                                                        <div style={{
+                                                                            width: '14px',
+                                                                            height: '14px',
+                                                                            borderRadius: '50%',
+                                                                            background: 'white',
+                                                                            position: 'absolute',
+                                                                            top: '2px',
+                                                                            left: (components.find(c => c.id === selectedComponentId)?.config.exact !== false) ? '16px' : '2px',
+                                                                            transition: 'left 0.2s'
+                                                                        }} />
+                                                                    </div>
+                                                                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-base)' }}>Exact Numbers (no K/M)</span>
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>UNIT OVERRIDE</label>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Auto-detecting..."
+                                                                    value={components.find(c => c.id === selectedComponentId)?.config.unit || ''}
+                                                                    onChange={(e) => updateComponentConfig(selectedComponentId, { unit: e.target.value })}
+                                                                    style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Collapse Toggle Arrow (Right) */}
+                                {selectedComponentId && (
+                                    <button
+                                        onClick={() => setSettingsCollapsed(!settingsCollapsed)}
+                                        style={{
+                                            position: 'absolute',
+                                            left: '-12px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            width: '24px',
+                                            height: '24px',
+                                            borderRadius: '50%',
+                                            background: 'var(--color-bg-base)',
+                                            border: '1px solid var(--color-border)',
+                                            color: 'var(--color-text-base)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            zIndex: 103,
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                                        }}
+                                    >
+                                        {settingsCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* File Explorer Modal */}
+                    <AnimatePresence>
+                        {showFileExplorer && (
+                            <div style={{
+                                position: 'fixed',
+                                inset: 0,
+                                background: 'rgba(0,0,0,0.8)',
+                                backdropFilter: 'blur(4px)',
+                                zIndex: 1000,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <div
+                                    style={{
+                                        width: '80%',
+                                        height: '80%',
+                                        background: 'var(--color-bg-elevated)',
+                                        borderRadius: 'var(--radius-lg)',
+                                        overflow: 'hidden',
+                                        display: 'flex',
+                                        flexDirection: 'column'
+                                    }}
+                                >
+                                    <div style={{
+                                        padding: 'var(--spacing-md)',
+                                        borderBottom: '1px solid var(--color-border)',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center'
+                                    }}>
+                                        <h3>Select 3D Model</h3>
+                                        <button onClick={() => setShowFileExplorer(false)} className="btn-icon">×</button>
+                                    </div>
+                                    <div style={{ flex: 1, overflow: 'auto' }}>
+                                        <FileExplorer
+                                            onSelect={async (selection) => {
+                                                if (fileExplorerTarget === 'viewer') {
+                                                    // Handle the structure returned by FileExplorer: { project, model, modelUrn }
+                                                    setProjectData(prev => ({
+                                                        ...prev,
+                                                        model: {
+                                                            urn: selection.modelUrn,
+                                                            name: selection.model.name,
+                                                            projectName: selection.project.name || 'Unknown Project'
+                                                        }
+                                                    }));
+                                                    setModelLoaded(false);
+                                                    setAvailableProperties([]);
+                                                    setShowFileExplorer(false);
+                                                } else {
+                                                    // Target is a component (e.g. Schedule) expecting an Excel file
+                                                    if (selection.model.name.endsWith('.xlsx')) {
+                                                        try {
+                                                            console.log('Fetching Excel file...', selection.model.name);
+                                                            console.log('Target Component ID:', fileExplorerTarget);
+
+                                                            // Use the raw URN (Version ID) and Project ID
+                                                            const buffer = await analyticsService.apsService.getFileContent(
+                                                                selection.model.projectId,
+                                                                selection.model.urn // Version ID
+                                                            );
+
+                                                            const workbook = XLSX.read(buffer, { type: 'array' });
+                                                            const sheetName = workbook.SheetNames[0];
+                                                            const worksheet = workbook.Sheets[sheetName];
+                                                            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                                                            if (jsonData && jsonData.length > 0) {
+                                                                const headers = jsonData[0];
+                                                                console.log('Excel Headers:', headers);
+
+                                                                // Update the component config
+                                                                updateComponentConfig(fileExplorerTarget, {
+                                                                    excelParams: {
+                                                                        fileName: selection.model.name,
+                                                                        urn: selection.model.urn,
+                                                                        projectId: selection.model.projectId,
+                                                                        headers: headers,
+                                                                        // Initialize mappings
+                                                                        modelKey: '',
+                                                                        excelKey: '',
+                                                                        excelName: '',
+                                                                        excelStart: '',
+                                                                        excelEnd: ''
+                                                                    }
+                                                                });
+                                                            } else {
+                                                                alert('Excel file appears strictly empty or invalid.');
+                                                            }
+
+                                                        } catch (error) {
+                                                            console.error("Error processing Excel file:", error);
+                                                            alert("Failed to download or parse Excel file. See console.");
+                                                        }
+                                                        setShowFileExplorer(false);
+                                                    } else {
+                                                        alert("Please select a valid .xlsx file.");
+                                                        // Do NOT close explorer
+                                                    }
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Floating AI Chat */}
+                    <AnimatePresence>
+                        {isAIChatOpen ? (
+                            <AIChatBot
+                                isOpen={isAIChatOpen}
+                                onClose={() => setIsAIChatOpen(false)}
+                                viewer={viewer}
+                                onDataClick={(ids) => setCurrentSelection(ids)}
+                            />
+                        ) : (
+                            <motion.button
+                                initial={{ scale: 0, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                                onClick={() => setIsAIChatOpen(true)}
+                                style={{
+                                    position: 'fixed',
+                                    bottom: '24px',
+                                    right: '24px',
+                                    width: '56px',
+                                    height: '56px',
+                                    borderRadius: '28px',
+                                    background: 'var(--color-primary)',
+                                    color: '#000',
+                                    border: 'none',
+                                    boxShadow: '0 8px 32px rgba(29, 185, 84, 0.4)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    zIndex: 9999,
+                                    cursor: 'pointer'
+                                }}
+                                title="AI Assistant"
+                            >
+                                <MessageSquare className="w-6 h-6" />
+                            </motion.button>
+                        )}
+                    </AnimatePresence>
                 </>
-            </ErrorBoundary>
-        </div>
+            </ErrorBoundary >
+        </div >
     );
 };
 
