@@ -814,9 +814,21 @@ class AnalyticsService {
                     val = String(val);
 
                     switch (condition.operator) {
-                        case 'equals': return val === condition.value;
-                        case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
-                        case 'not_equals': return val !== condition.value;
+                        case 'equals':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.includes(val);
+                            }
+                            return val === condition.value;
+                        case 'contains':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.some(v => val.toLowerCase().includes(v.toLowerCase()));
+                            }
+                            return val.toLowerCase().includes(condition.value.toLowerCase());
+                        case 'not_equals':
+                            if (Array.isArray(condition.value)) {
+                                return !condition.value.includes(val);
+                            }
+                            return val !== condition.value;
                         default: return true;
                     }
                 });
@@ -863,12 +875,23 @@ class AnalyticsService {
             filtered = masterData.filter(item => {
                 const conditionResults = filters.map(condition => {
                     const val = item[condition.attribute] !== undefined ? String(item[condition.attribute]) : 'Undefined';
-                    const target = String(condition.value);
 
                     switch (condition.operator) {
-                        case 'equals': return val === target;
-                        case 'contains': return val.toLowerCase().includes(target.toLowerCase());
-                        case 'not_equals': return val !== target;
+                        case 'equals':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.includes(val);
+                            }
+                            return val === String(condition.value);
+                        case 'contains':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.some(v => val.toLowerCase().includes(v.toLowerCase()));
+                            }
+                            return val.toLowerCase().includes(String(condition.value).toLowerCase());
+                        case 'not_equals':
+                            if (Array.isArray(condition.value)) {
+                                return !condition.value.includes(val);
+                            }
+                            return val !== String(condition.value);
                         default: return true;
                     }
                 });
@@ -929,9 +952,21 @@ class AnalyticsService {
                     val = String(val);
 
                     switch (condition.operator) {
-                        case 'equals': return val === condition.value;
-                        case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
-                        case 'not_equals': return val !== condition.value;
+                        case 'equals':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.includes(val);
+                            }
+                            return val === condition.value;
+                        case 'contains':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.some(v => val.toLowerCase().includes(v.toLowerCase()));
+                            }
+                            return val.toLowerCase().includes(condition.value.toLowerCase());
+                        case 'not_equals':
+                            if (Array.isArray(condition.value)) {
+                                return !condition.value.includes(val);
+                            }
+                            return val !== condition.value;
                         default: return true;
                     }
                 });

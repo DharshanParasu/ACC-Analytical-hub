@@ -35,7 +35,8 @@ const componentTypes = [
         type: 'schedule', icon: Calendar, label: 'Schedule Visual', component: ScheduleVisual, defaultSize: { w: 12, h: 6 }, defaultConfig: {
             activityNameAttribute: 'Activity Name',
             startDateAttribute: 'Start Date',
-            endDateAttribute: 'End Date'
+            endDateAttribute: 'End Date',
+            playbackSpeed: 1
         }
     }
 ];
@@ -456,6 +457,7 @@ const DashboardBuilder = () => {
                 style={{ height: '100%', cursor: 'pointer' }}
             >
                 <ComponentType
+                    id={comp.id}
                     config={comp.config}
                     viewer={modelLoaded ? viewer : null}
                     joinedData={joinedData}
@@ -468,6 +470,7 @@ const DashboardBuilder = () => {
                     globalSync={globalSync}
                     timelineDate={timelineDate}
                     onTimelineDateChange={setTimelineDate}
+                    updateComponentConfig={updateComponentConfig}
                 />
             </div>
         );
@@ -1169,7 +1172,7 @@ const DashboardBuilder = () => {
                                         className="hover:bg-[var(--color-primary)] opacity-30"
                                     />
                                 )}
-                                <div style={{ flex: 1, overflow: 'hidden', opacity: (settingsCollapsed || !selectedComponentId) ? 0 : 1, transition: 'opacity 0.2s' }}>
+                                <div style={{ flex: 1, overflow: 'hidden', opacity: (settingsCollapsed || !selectedComponentId) ? 0 : 1, transition: 'opacity 0.2s', height: '100%', display: 'flex', flexDirection: 'column' }}>
                                     {selectedComponentId && (
                                         <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1179,7 +1182,7 @@ const DashboardBuilder = () => {
                                                 </button>
                                             </div>
 
-                                            <div style={{ flex: 1, overflowY: 'auto' }}>
+                                            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}>
                                                 {/* Settings Content (Reused from previous implementation) */}
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                                                     <div>
@@ -1307,25 +1310,70 @@ const DashboardBuilder = () => {
                                                                 </div>
                                                             )}
 
-                                                            {/* Aggregation Selector for KPI */}
-                                                            {components.find(c => c.id === selectedComponentId)?.type === 'kpi' && (
-                                                                <div>
-                                                                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>AGGREGATION</label>
-                                                                    <div className="flex bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-md p-1">
-                                                                        {['count', 'sum'].map(type => {
-                                                                            const currentType = components.find(c => c.id === selectedComponentId)?.config.aggregationType || 'count';
-                                                                            const isActive = currentType === type;
-                                                                            return (
-                                                                                <button
-                                                                                    key={type}
-                                                                                    onClick={() => updateComponentConfig(selectedComponentId, { aggregationType: type })}
-                                                                                    className={`flex-1 py-1.5 text-xs font-semibold rounded uppercase tracking-wider transition-all ${isActive ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]'}`}
-                                                                                >
-                                                                                    {type}
-                                                                                </button>
-                                                                            );
-                                                                        })}
+                                                            {/* Aggregation Selector for KPI, Bar, Pie */}
+                                                            {['pie', 'bar', 'kpi'].includes(components.find(c => c.id === selectedComponentId)?.type) && (
+                                                                <div className="flex flex-col gap-4">
+                                                                    <div>
+                                                                        <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>AGGREGATION</label>
+                                                                        <div className="flex bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-md p-1">
+                                                                            {['count', 'sum'].map(type => {
+                                                                                const currentType = components.find(c => c.id === selectedComponentId)?.config.aggregationType || 'count';
+                                                                                const isActive = currentType === type;
+                                                                                return (
+                                                                                    <button
+                                                                                        key={type}
+                                                                                        onClick={() => updateComponentConfig(selectedComponentId, { aggregationType: type })}
+                                                                                        className={`flex-1 py-1.5 text-xs font-semibold rounded uppercase tracking-wider transition-all ${isActive ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-base)]'}`}
+                                                                                    >
+                                                                                        {type}
+                                                                                    </button>
+                                                                                );
+                                                                            })}
+                                                                        </div>
                                                                     </div>
+
+                                                                    {components.find(c => c.id === selectedComponentId)?.config.aggregationType === 'sum' && (
+                                                                        <div>
+                                                                            <label style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>SUM PROPERTY</label>
+                                                                            <select
+                                                                                value={components.find(c => c.id === selectedComponentId)?.config.sumAttribute || ''}
+                                                                                onChange={(e) => updateComponentConfig(selectedComponentId, { sumAttribute: e.target.value })}
+                                                                                style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
+                                                                            >
+                                                                                <option value="">Select numeric property...</option>
+                                                                                {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                            </select>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Sync Colors Toggle */}
+                                                                    {['pie', 'bar'].includes(components.find(c => c.id === selectedComponentId)?.type) && (
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '4px' }} onClick={() => {
+                                                                            const current = components.find(c => c.id === selectedComponentId)?.config.applyColorsToModel;
+                                                                            updateComponentConfig(selectedComponentId, { applyColorsToModel: !current });
+                                                                        }}>
+                                                                            <div style={{
+                                                                                width: '32px',
+                                                                                height: '18px',
+                                                                                borderRadius: '9px',
+                                                                                background: components.find(c => c.id === selectedComponentId)?.config.applyColorsToModel ? 'var(--color-primary)' : '#555',
+                                                                                position: 'relative',
+                                                                                transition: 'background 0.2s'
+                                                                            }}>
+                                                                                <div style={{
+                                                                                    width: '14px',
+                                                                                    height: '14px',
+                                                                                    borderRadius: '50%',
+                                                                                    background: 'white',
+                                                                                    position: 'absolute',
+                                                                                    top: '2px',
+                                                                                    left: components.find(c => c.id === selectedComponentId)?.config.applyColorsToModel ? '16px' : '2px',
+                                                                                    transition: 'left 0.2s'
+                                                                                }} />
+                                                                            </div>
+                                                                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-base)' }}>Sync colors to model</span>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             )}
                                                             {/* Add more setting controls as needed based on old logic */}
@@ -1366,6 +1414,147 @@ const DashboardBuilder = () => {
                                                                     onChange={(e) => updateComponentConfig(selectedComponentId, { unit: e.target.value })}
                                                                     style={{ width: '100%', padding: '10px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-text-base)' }}
                                                                 />
+                                                            </div>
+
+                                                            <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', margin: '8px 0' }} />
+
+                                                            {/* Filters Section */}
+                                                            <div className="flex flex-col gap-3 pb-8">
+                                                                <div className="flex justify-between items-center">
+                                                                    <label className="text-[10px] text-lime-400 uppercase font-black tracking-widest">Filters</label>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            const comp = components.find(c => c.id === selectedComponentId);
+                                                                            const currentFilters = comp?.config?.filters || [];
+                                                                            updateComponentConfig(selectedComponentId, {
+                                                                                filters: [...currentFilters, { attribute: '', operator: 'equals', value: '' }]
+                                                                            });
+                                                                        }}
+                                                                        className="text-[10px] bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 px-2 py-1 rounded border border-lime-400/20 transition-colors"
+                                                                    >
+                                                                        + ADD FILTER
+                                                                    </button>
+                                                                </div>
+
+                                                                <div className="flex flex-col gap-2">
+                                                                    {(components.find(c => c.id === selectedComponentId)?.config?.filters || []).map((filter, idx) => (
+                                                                        <div key={idx} className="bg-white/5 border border-white/10 rounded-lg p-2 flex flex-col gap-2 relative group">
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const currentFilters = components.find(c => c.id === selectedComponentId)?.config?.filters || [];
+                                                                                    const newFilters = currentFilters.filter((_, i) => i !== idx);
+                                                                                    updateComponentConfig(selectedComponentId, { filters: newFilters });
+                                                                                }}
+                                                                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500/80 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 scale-75"
+                                                                            >
+                                                                                <X size={10} />
+                                                                            </button>
+
+                                                                            <select
+                                                                                value={filter.attribute}
+                                                                                onChange={(e) => {
+                                                                                    const currentFilters = [...(components.find(c => c.id === selectedComponentId)?.config?.filters || [])];
+                                                                                    currentFilters[idx].attribute = e.target.value;
+                                                                                    updateComponentConfig(selectedComponentId, { filters: currentFilters });
+                                                                                }}
+                                                                                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px] text-white outline-none focus:border-lime-400/30"
+                                                                            >
+                                                                                <option value="">Attribute...</option>
+                                                                                {availableProperties.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                            </select>
+
+                                                                            <div className="flex gap-2">
+                                                                                <select
+                                                                                    value={filter.operator}
+                                                                                    onChange={(e) => {
+                                                                                        const currentFilters = [...(components.find(c => c.id === selectedComponentId)?.config?.filters || [])];
+                                                                                        currentFilters[idx].operator = e.target.value;
+                                                                                        updateComponentConfig(selectedComponentId, { filters: currentFilters });
+                                                                                    }}
+                                                                                    className="w-24 bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px] text-white outline-none"
+                                                                                >
+                                                                                    <option value="equals">is</option>
+                                                                                    <option value="contains">contains</option>
+                                                                                    <option value="not_equals">is not</option>
+                                                                                </select>
+
+                                                                                {/* Multi-select filter value picker */}
+                                                                                <div className="flex-1 relative">
+                                                                                    <div className="bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px] text-white min-h-[24px] cursor-pointer hover:border-lime-400/30 flex flex-wrap gap-1 items-center"
+                                                                                        onClick={() => {
+                                                                                            const current = components.find(c => c.id === selectedComponentId)?.config?.filters || [];
+                                                                                            const newFilters = [...current];
+                                                                                            newFilters[idx]._showDropdown = !newFilters[idx]._showDropdown;
+                                                                                            updateComponentConfig(selectedComponentId, { filters: newFilters });
+                                                                                        }}>
+                                                                                        {Array.isArray(filter.value) && filter.value.length > 0 ? (
+                                                                                            filter.value.map(v => (
+                                                                                                <span key={v} className="bg-lime-400/20 text-lime-400 px-1 rounded flex items-center gap-1">
+                                                                                                    {v}
+                                                                                                    <X size={8} className="cursor-pointer" onClick={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        const current = components.find(c => c.id === selectedComponentId)?.config?.filters || [];
+                                                                                                        const newFilters = [...current];
+                                                                                                        newFilters[idx].value = filter.value.filter(val => val !== v);
+                                                                                                        updateComponentConfig(selectedComponentId, { filters: newFilters });
+                                                                                                    }} />
+                                                                                                </span>
+                                                                                            ))
+                                                                                        ) : (
+                                                                                            <span className="text-white/40">{Array.isArray(filter.value) ? 'Select values...' : (filter.value || 'Value...')}</span>
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                    {filter._showDropdown && filter.attribute && (
+                                                                                        <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1c1e] border border-white/20 rounded-lg shadow-2xl z-[200] max-h-48 overflow-y-auto p-1 backdrop-blur-md">
+                                                                                            {analyticsService.getUniqueValuesFromData(masterData || [], filter.attribute).map(val => (
+                                                                                                <div key={val}
+                                                                                                    className={`px-2 py-1.5 rounded cursor-pointer text-[10px] hover:bg-white/10 transition-colors flex items-center gap-2 ${Array.isArray(filter.value) && filter.value.includes(val) ? 'text-lime-400 bg-lime-400/10' : 'text-white/70'}`}
+                                                                                                    onClick={() => {
+                                                                                                        const current = components.find(c => c.id === selectedComponentId)?.config?.filters || [];
+                                                                                                        const newFilters = [...current];
+                                                                                                        const currentValues = Array.isArray(filter.value) ? filter.value : (filter.value ? [filter.value] : []);
+
+                                                                                                        if (currentValues.includes(val)) {
+                                                                                                            newFilters[idx].value = currentValues.filter(v => v !== val);
+                                                                                                        } else {
+                                                                                                            newFilters[idx].value = [...currentValues, val];
+                                                                                                        }
+                                                                                                        updateComponentConfig(selectedComponentId, { filters: newFilters });
+                                                                                                    }}>
+                                                                                                    <input
+                                                                                                        type="checkbox"
+                                                                                                        checked={Array.isArray(filter.value) && filter.value.includes(val)}
+                                                                                                        readOnly
+                                                                                                        className="w-3 h-3 rounded border-white/20 bg-black/40 accent-lime-400 cursor-pointer"
+                                                                                                    />
+                                                                                                    <span className="truncate">{val}</span>
+
+
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+
+                                                                {(components.find(c => c.id === selectedComponentId)?.config?.filters || []).length > 1 && (
+                                                                    <div className="flex items-center gap-2 mt-1">
+                                                                        <span className="text-[9px] text-white/40 uppercase font-bold">Operator:</span>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const current = components.find(c => c.id === selectedComponentId)?.config?.logicalOperator || 'AND';
+                                                                                updateComponentConfig(selectedComponentId, { logicalOperator: current === 'AND' ? 'OR' : 'AND' });
+                                                                            }}
+                                                                            className="px-2 py-0.5 rounded bg-white/10 text-[9px] text-white font-bold hover:bg-white/20 transition-colors"
+                                                                        >
+                                                                            {components.find(c => c.id === selectedComponentId)?.config?.logicalOperator || 'AND'}
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     )}

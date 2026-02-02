@@ -5,7 +5,7 @@ import { Play, Pause, RotateCcw, SkipBack } from 'lucide-react';
 import analyticsService from '../../services/analyticsService';
 
 const ScheduleVisual = (props) => {
-    const { config, viewer, onDataClick, scopedDbIds, joinedData, masterData } = props;
+    const { id, config, viewer, onDataClick, scopedDbIds, joinedData, masterData, updateComponentConfig } = props;
     const [isPlaying, setIsPlaying] = useState(false);
     const [playbackSpeed, setPlaybackSpeed] = useState(1); // Days per tick
     const [startDate, setStartDate] = useState(null);
@@ -247,13 +247,16 @@ const ScheduleVisual = (props) => {
 
     // Playback Loop
     const animate = (time) => {
-        if (lastTimeRef.current != undefined) {
-            // Update current date
+        if (lastTimeRef.current !== undefined) {
             setCurrentDate(prevDate => {
                 if (!prevDate || !endDate) return prevDate;
 
-                const nextDate = new Date(prevDate);
-                nextDate.setDate(nextDate.getDate() + playbackSpeed);
+                // config.playbackSpeed is days per tick. 
+                // To allow slower speeds, we use timestamps
+                const speed = config.playbackSpeed || 1;
+                const msPerDay = 24 * 60 * 60 * 1000;
+                const nextTime = prevDate.getTime() + (speed * msPerDay);
+                const nextDate = new Date(nextTime);
 
                 if (nextDate >= endDate) {
                     setIsPlaying(false);
@@ -410,15 +413,23 @@ const ScheduleVisual = (props) => {
                     >
                         {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
                     </button>
-                    <select
-                        value={playbackSpeed}
-                        onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
-                        className="bg-white/5 border border-white/10 text-white text-xs px-3 py-2 rounded-lg outline-none focus:border-lime-400/50 transition-colors"
-                    >
-                        <option value={1}>1x (1 day/frame)</option>
-                        <option value={7}>7x (1 week/frame)</option>
-                        <option value={30}>30x (1 month/frame)</option>
-                    </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '10px', color: 'var(--color-text-subdued)', whiteSpace: 'nowrap' }}>Speed:</span>
+                        <input
+                            type="range"
+                            min="0.05"
+                            max="10"
+                            step="0.05"
+                            value={config.playbackSpeed || 1}
+                            onChange={(e) => {
+                                updateComponentConfig(id || config.id, { playbackSpeed: parseFloat(e.target.value) });
+                            }}
+                            style={{ width: '80px', accentColor: 'var(--color-primary)', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontSize: '10px', color: 'var(--color-primary)', fontWeight: 'bold', width: '30px' }}>
+                            {config.playbackSpeed || 1}x
+                        </span>
+                    </div>
                 </div>
             </div>
 
