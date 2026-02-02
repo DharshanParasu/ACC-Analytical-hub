@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { Link, useLocation } from 'react-router-dom';
 
-const Sidebar = ({ user }) => {
+const Sidebar = ({ user, isCollapsed, toggleCollapse }) => {
     const location = useLocation();
 
     const menuItems = [
@@ -24,35 +24,52 @@ const Sidebar = ({ user }) => {
                 left: 0,
                 top: 0,
                 bottom: 0,
-                width: '240px',
+                width: isCollapsed ? '64px' : '240px',
                 background: 'var(--color-bg-base)',
-                padding: 'var(--spacing-lg)',
+                padding: isCollapsed ? '16px 8px' : 'var(--spacing-lg)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 'var(--spacing-md)',
-                zIndex: 'var(--z-fixed)'
+                zIndex: 'var(--z-fixed)',
+                borderRight: '1px solid var(--color-border)',
+                transition: 'width 0.3s ease, padding 0.3s ease',
+                overflow: 'hidden'
             }}
         >
-            {/* Logo */}
-            <div style={{ padding: 'var(--spacing-md) 0' }}>
-                <h1
+            {/* Header / Toggle */}
+            <div style={{
+                padding: isCollapsed ? '0 0 16px 0' : 'var(--spacing-md) 0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: isCollapsed ? 'center' : 'space-between',
+                height: '60px'
+            }}>
+                {!isCollapsed && (
+                    <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        <h1 style={{ fontSize: '20px', fontWeight: '900', color: 'var(--color-text-base)', margin: 0 }}>Analytics Hub</h1>
+                        <p style={{ fontSize: '10px', color: 'var(--color-text-subdued)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Platform</p>
+                    </div>
+                )}
+
+                <button
+                    onClick={toggleCollapse}
+                    className="btn-icon"
                     style={{
-                        fontSize: 'var(--font-size-2xl)',
-                        fontWeight: 'var(--font-weight-black)',
-                        color: 'var(--color-text-base)',
-                        marginBottom: '4px'
+                        background: 'transparent',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        color: 'var(--color-text-subdued)',
+                        padding: '4px',
+                        minWidth: '24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginLeft: isCollapsed ? 0 : 'auto'
                     }}
                 >
-                    Analytics Hub
-                </h1>
-                <p style={{
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-text-subdued)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em'
-                }}>
-                    Dashboard Platform
-                </p>
+                    {isCollapsed ? '➡' : '⬅'}
+                </button>
             </div>
 
             {/* Navigation */}
@@ -69,6 +86,7 @@ const Sidebar = ({ user }) => {
                             key={item.path}
                             to={item.path}
                             style={{ textDecoration: 'none' }}
+                            title={isCollapsed ? item.label : ''}
                         >
                             <motion.div
                                 whileHover={{ backgroundColor: 'var(--color-bg-highlight)' }}
@@ -76,6 +94,7 @@ const Sidebar = ({ user }) => {
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
+                                    justifyContent: isCollapsed ? 'center' : 'flex-start',
                                     gap: 'var(--spacing-md)',
                                     padding: '12px 16px',
                                     borderRadius: 'var(--radius-sm)',
@@ -90,7 +109,7 @@ const Sidebar = ({ user }) => {
                                 <span style={{ fontSize: '20px' }}>
                                     {item.icon}
                                 </span>
-                                <span>{item.label}</span>
+                                {!isCollapsed && <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>}
                             </motion.div>
                         </Link>
                     );
@@ -105,35 +124,41 @@ const Sidebar = ({ user }) => {
             }} />
 
             {/* Library Section */}
-            <div style={{
-                padding: '12px 16px',
-                color: 'var(--color-text-subdued)',
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: 'var(--font-weight-semibold)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em'
-            }}>
-                Your Library
-            </div>
+            {!isCollapsed && (
+                <div style={{
+                    padding: '12px 16px',
+                    color: 'var(--color-text-subdued)',
+                    fontSize: 'var(--font-size-sm)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    whiteSpace: 'nowrap'
+                }}>
+                    Your Library
+                </div>
+            )}
 
             {/* User Session Info */}
             {user && (
                 <div style={{
-                    padding: '12px 16px',
+                    padding: isCollapsed ? '12px' : '12px 16px',
                     borderRadius: 'var(--radius-md)',
                     background: 'rgba(255,255,255,0.03)',
-                    marginTop: 'auto'
+                    marginTop: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: isCollapsed ? 'center' : 'flex-start'
                 }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-subdued)', marginBottom: '8px' }}>USER SESSION</div>
+                    {!isCollapsed && <div style={{ fontSize: '0.75rem', color: 'var(--color-text-subdued)', marginBottom: '8px', whiteSpace: 'nowrap' }}>USER SESSION</div>}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#1db954' }}></div>
-                        <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>Active</span>
+                        {!isCollapsed && <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>Active</span>}
                     </div>
                 </div>
             )}
 
             {/* Tip Card if not logged in */}
-            {!user && (
+            {!user && !isCollapsed && (
                 <div style={{
                     marginTop: 'auto',
                     padding: 'var(--spacing-md)',

@@ -6,7 +6,7 @@ import analyticsService from '../../services/analyticsService';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds }) => {
+const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, scopedDbIds, joinedData }) => {
     const chartRef = useRef();
     const { title = 'Bar Chart', data: customData, orientation = 'vertical', attribute, filters, logicalOperator } = config;
     const [chartData, setChartData] = useState(null);
@@ -17,14 +17,14 @@ const BarChart = ({ config = {}, viewer, onDataClick, onThematicColorChange, sco
         if (viewer && attribute) {
             loadModelData();
         }
-    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds]);
+    }, [viewer, attribute, JSON.stringify(filters), logicalOperator, config.aggregationType, config.sumAttribute, scopedDbIds, joinedData]);
 
     const loadModelData = async () => {
         setLoading(true);
         try {
             const aggType = config.aggregationType || 'count';
             const sumAttr = aggType === 'sum' ? (config.sumAttribute || null) : null;
-            const agg = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds);
+            const agg = await analyticsService.aggregateByProperty(viewer, attribute, filters, logicalOperator, sumAttr, scopedDbIds, joinedData);
             setAggregation(agg);
             const data = analyticsService.getChartData(agg, attribute, 'Total', 'bar', aggType);
             setChartData(data);

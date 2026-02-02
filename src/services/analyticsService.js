@@ -4,6 +4,10 @@ import apsService from './apsService';
  * Analytics Service for extracting and aggregating data from the APS Viewer
  */
 class AnalyticsService {
+    constructor() {
+        this.apsService = apsService;
+    }
+
     /**
      * Extracts all properties from the model using a multi-layered approach:
      * 1. AEC Data Model (GraphQL) - Direct cloud-to-cloud BIM data
@@ -212,7 +216,7 @@ class AnalyticsService {
     /**
      * Aggregates model data by a specific property, optionally filtered by conditions
      */
-    async aggregateByProperty(viewer, propertyName, conditions = [], logicalOperator = 'AND', sumProperty = null, scopeDbIds = null) {
+    async aggregateByProperty(viewer, propertyName, conditions = [], logicalOperator = 'AND', sumProperty = null, scopeDbIds = null, joinedData = null) {
         return new Promise((resolve) => {
             if (!viewer || !viewer.model) return resolve({});
 
@@ -234,6 +238,8 @@ class AnalyticsService {
 
                 const attrsToFetch = [propertyName, ...conditions.map(c => c.attribute)];
                 if (sumProperty) attrsToFetch.push(sumProperty);
+                // ALWAYS add 'Name' to ensure the viewer returns the element even if other properties are missing (external only)
+                attrsToFetch.push('Name');
                 const uniqueAttrs = Array.from(new Set(attrsToFetch));
 
                 viewer.model.getBulkProperties(targetDbIds, uniqueAttrs, (results) => {
@@ -245,7 +251,12 @@ class AnalyticsService {
                         if (conditions.length > 0) {
                             const conditionResults = conditions.map(condition => {
                                 const prop = res.properties.find(p => p.displayName === condition.attribute);
-                                const val = prop ? String(prop.displayValue) : 'Undefined';
+                                let val = prop ? String(prop.displayValue) : null;
+                                // Fallback to joined data
+                                if (val === null && joinedData && joinedData[res.dbId] && joinedData[res.dbId][condition.attribute] !== undefined) {
+                                    val = String(joinedData[res.dbId][condition.attribute]);
+                                }
+                                if (val === null) val = 'Undefined';
 
                                 switch (condition.operator) {
                                     case 'equals': return val === condition.value;
@@ -259,8 +270,13 @@ class AnalyticsService {
 
                         if (passed) {
                             const targetProp = res.properties.find(p => p.displayName === propertyName);
-                            if (targetProp) {
-                                const value = targetProp.displayValue;
+                            let value = targetProp ? targetProp.displayValue : null;
+                            // Fallback to joined data
+                            if (value === null && joinedData && joinedData[res.dbId] && joinedData[res.dbId][propertyName] !== undefined) {
+                                value = joinedData[res.dbId][propertyName];
+                            }
+
+                            if (value !== null) {
                                 if (!aggregation[value]) {
                                     aggregation[value] = { dbIds: [], sum: 0, count: 0 };
                                 }
@@ -269,8 +285,14 @@ class AnalyticsService {
 
                                 if (sumProperty) {
                                     const valProp = res.properties.find(p => p.displayName === sumProperty);
-                                    if (valProp && !isNaN(parseFloat(valProp.displayValue))) {
-                                        aggregation[value].sum += parseFloat(valProp.displayValue);
+                                    let sumVal = valProp ? parseFloat(valProp.displayValue) : null;
+                                    // Fallback to joined data
+                                    if (sumVal === null && joinedData && joinedData[res.dbId] && joinedData[res.dbId][sumProperty] !== undefined) {
+                                        sumVal = parseFloat(joinedData[res.dbId][sumProperty]);
+                                    }
+
+                                    if (sumVal !== null && !isNaN(sumVal)) {
+                                        aggregation[value].sum += sumVal;
                                     }
                                 }
                             }
@@ -294,7 +316,7 @@ class AnalyticsService {
         });
     }
 
-    async aggregateByMultipleProperties(viewer, propertyNames = [], conditions = [], logicalOperator = 'AND', scopeDbIds = null) {
+    async aggregateByMultipleProperties(viewer, propertyNames = [], conditions = [], logicalOperator = 'AND', scopeDbIds = null, joinedData = null) {
         return new Promise((resolve) => {
             if (!viewer || !viewer.model || propertyNames.length === 0) return resolve({});
 
@@ -322,7 +344,11 @@ class AnalyticsService {
                         if (conditions.length > 0) {
                             const conditionResults = conditions.map(condition => {
                                 const prop = res.properties.find(p => p.displayName === condition.attribute);
-                                const val = prop ? String(prop.displayValue) : 'Undefined';
+                                let val = prop ? String(prop.displayValue) : null;
+                                if (val === null && joinedData && joinedData[res.dbId] && joinedData[res.dbId][condition.attribute] !== undefined) {
+                                    val = String(joinedData[res.dbId][condition.attribute]);
+                                }
+                                if (val === null) val = 'Undefined';
                                 switch (condition.operator) {
                                     case 'equals': return val === condition.value;
                                     case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
@@ -336,7 +362,11 @@ class AnalyticsService {
                         if (passed) {
                             const values = propertyNames.map(name => {
                                 const prop = res.properties.find(p => p.displayName === name);
-                                return prop ? prop.displayValue : 'Undefined';
+                                if (prop) return prop.displayValue;
+                                if (joinedData && joinedData[res.dbId] && joinedData[res.dbId][name] !== undefined) {
+                                    return joinedData[res.dbId][name];
+                                }
+                                return 'Undefined';
                             });
                             const key = JSON.stringify(values);
                             if (!aggregation[key]) aggregation[key] = [];
@@ -390,7 +420,7 @@ class AnalyticsService {
         };
     }
 
-    async searchElements(viewer, filters) {
+    async searchElements(viewer, filters, joinedData = null) {
         return new Promise((resolve) => {
             if (!viewer || !viewer.model || !filters || filters.length === 0) return resolve([]);
             const instanceTree = viewer.model.getInstanceTree();
@@ -401,28 +431,122 @@ class AnalyticsService {
                 if (instanceTree.getChildCount(dbId) === 0) allDbIds.push(dbId);
             }, true);
 
-            viewer.model.getBulkProperties(allDbIds, [], (results) => {
+            const filterProps = filters.map(f => f.attribute);
+            // Ensure we fetch the property we are filtering by, plus Name to ensure element returned
+            const propsToFetch = [...new Set([...filterProps, 'Name'])];
+
+            viewer.model.getBulkProperties(allDbIds, propsToFetch, (results) => {
                 const matchedDbIds = [];
                 results.forEach(res => {
                     let passed = filters.every(filter => {
                         const targetAttr = filter.attribute.toLowerCase();
                         const targetValue = String(filter.value).toLowerCase();
-                        const foundProp = res.properties.find(p => {
+
+                        // Check Model Prop
+                        let foundProp = res.properties.find(p => {
                             const pName = p.displayName.toLowerCase();
-                            const isNameMatch = pName === targetAttr || pName.includes(targetAttr) || (targetAttr === 'category' && (pName.includes('category') || pName === 'type'));
-                            if (!isNameMatch) return false;
-                            const pValue = String(p.displayValue).toLowerCase();
-                            if (filter.operator === 'contains') return pValue.includes(targetValue);
-                            if (filter.operator === 'not_equals') return pValue !== targetValue;
-                            return pValue === targetValue || pValue.includes(targetValue);
+                            return pName === targetAttr || pName.includes(targetAttr) || (targetAttr === 'category' && (pName.includes('category') || pName === 'type'));
                         });
-                        return !!foundProp;
+
+                        // Check Joined Data Prop
+                        let pValue = null;
+                        if (foundProp) {
+                            pValue = String(foundProp.displayValue).toLowerCase();
+                        } else if (joinedData && joinedData[res.dbId] && joinedData[res.dbId][filter.attribute]) {
+                            pValue = String(joinedData[res.dbId][filter.attribute]).toLowerCase();
+                        }
+
+                        if (pValue === null) return false;
+
+                        if (filter.operator === 'contains') return pValue.includes(targetValue);
+                        if (filter.operator === 'not_equals') return pValue !== targetValue;
+                        return pValue === targetValue || pValue.includes(targetValue);
                     });
                     if (passed) matchedDbIds.push(res.dbId);
                 });
                 resolve(matchedDbIds);
             }, (err) => resolve([]));
         });
+    }
+
+    /**
+     * Joins Model Data with External Data (Excel) based on a common key.
+     * @param {Object} viewer - APS Viewer instance
+     * @param {string} modelKey - The property name in the model (e.g. "Activity ID")
+     * @param {Array} externalData - Array of objects from Excel
+     * @param {string} externalKey - The column name in Excel to match (e.g. "Activity ID")
+     * @returns {Promise<Object>} Map of dbId -> { ...externalRowData }
+     */
+    async joinExternalData(viewer, modelKey, externalData, externalKey) {
+        return new Promise((resolve, reject) => {
+            if (!viewer || !viewer.model || !modelKey || !externalData || !externalKey) {
+                return resolve({});
+            }
+
+            console.log(`[Analytics] Joining on: Model[${modelKey}] <-> Ext[${externalKey}]`);
+
+            // Index external data for O(1) lookup
+            const externalIndex = new Map();
+            externalData.forEach(row => {
+                const keyVal = String(row[externalKey] || '').trim().toLowerCase();
+                if (keyVal) {
+                    externalIndex.set(keyVal, row);
+                }
+            });
+
+            // Get all model elements with the modelKey property
+            const instanceTree = viewer.model.getInstanceTree();
+            if (!instanceTree) return resolve({});
+
+            const leafIds = [];
+            instanceTree.enumNodeChildren(instanceTree.getRootId(), (dbId) => {
+                if (instanceTree.getChildCount(dbId) === 0) leafIds.push(dbId);
+            }, true);
+
+            viewer.model.getBulkProperties(leafIds, [modelKey], (results) => {
+                const dbIdToJoinedData = {};
+                let matchCount = 0;
+
+                results.forEach(res => {
+                    const prop = res.properties.find(p => p.displayName === modelKey);
+                    if (prop) {
+                        const modelVal = String(prop.displayValue).trim().toLowerCase();
+                        if (externalIndex.has(modelVal)) {
+                            dbIdToJoinedData[res.dbId] = externalIndex.get(modelVal);
+                            matchCount++;
+                        }
+                    }
+                });
+
+                console.log(`[Analytics] Join Complete. Matched ${matchCount} elements.`);
+                resolve(dbIdToJoinedData);
+            }, (err) => {
+                console.error("[Analytics] Join failed during prop extraction", err);
+                reject(err);
+            });
+        });
+    }
+
+    /**
+     * Returns a combined list of property names from the model and all linked external sources.
+     */
+    async getUnifiedPropertyNames(viewer, projectData) {
+        // 1. Get Model Properties
+        const modelProps = await this.getModelPropertyNames(viewer);
+
+        // 2. Get External Data Headers
+        const externalProps = new Set();
+        if (projectData && projectData.sources) {
+            Object.values(projectData.sources).forEach(source => {
+                if (source.headers) {
+                    source.headers.forEach(h => externalProps.add(h));
+                }
+            });
+        }
+
+        // 3. Merge and Sort
+        const combined = new Set([...modelProps, ...externalProps]);
+        return Array.from(combined).sort();
     }
 
     async getUniquePropertyValues(viewer, propertyName) {
@@ -453,6 +577,236 @@ class AnalyticsService {
                 setTimeout(executeDiscovery, 2000);
             }
         });
+    }
+    /**
+     * MASTER DATA FETCH
+     * Fetches ALL properties for ALL elements and merges with external data sources.
+     * @returns {Promise<Array>} Array of unified data objects for each object in the model.
+     */
+    async getAllData(viewer, projectData) {
+        return new Promise((resolve) => {
+            if (!viewer || !viewer.model) return resolve([]);
+
+            console.log('[Analytics] Starting Master Data Fetch...');
+            const instanceTree = viewer.model.getInstanceTree();
+            if (!instanceTree) return resolve([]);
+
+            // 1. Get all Leaf Node DBIDs
+            const allDbIds = [];
+            instanceTree.enumNodeChildren(instanceTree.getRootId(), (dbId) => {
+                if (instanceTree.getChildCount(dbId) === 0) {
+                    allDbIds.push(dbId);
+                }
+            }, true);
+
+            if (allDbIds.length === 0) return resolve([]);
+            console.log(`[Analytics] Found ${allDbIds.length} elements. Fetching properties...`);
+
+            // 2. Prepare External Data Indices
+            const externalIndices = {};
+            const sourceConfigs = [];
+
+            if (projectData && projectData.sources) {
+                Object.values(projectData.sources).forEach(source => {
+                    if (source.data && source.mapping && source.mapping.modelKey && source.mapping.fileKey) {
+                        const index = new Map();
+                        source.data.forEach(row => {
+                            const keyVal = String(row[source.mapping.fileKey] || '').trim().toLowerCase();
+                            if (keyVal) index.set(keyVal, row);
+                        });
+
+                        sourceConfigs.push({
+                            modelKey: source.mapping.modelKey,
+                            index: index,
+                            config: source
+                        });
+                    }
+                });
+            }
+
+            // 3. Fetch ALL Properties for ALL Nodes
+            // We pass null to getBulkProperties to request ALL properties.
+            viewer.model.getBulkProperties(allDbIds, null, (results) => {
+                const masterData = [];
+
+                results.forEach(res => {
+                    const dataObject = { dbId: res.dbId, name: res.name };
+
+                    // Map Model Properties
+                    res.properties.forEach(p => {
+                        // Store by DisplayName (e.g. "Category", "Material")
+                        dataObject[p.displayName] = p.displayValue;
+                    });
+
+                    // Merge External Data
+                    sourceConfigs.forEach(src => {
+                        const modelVal = String(dataObject[src.modelKey] || '').trim().toLowerCase();
+                        if (src.index.has(modelVal)) {
+                            const externalRow = src.index.get(modelVal);
+                            // Spread external row into data object
+                            Object.assign(dataObject, externalRow);
+                            src.matchCount = (src.matchCount || 0) + 1;
+                        }
+                    });
+
+                    masterData.push(dataObject);
+                });
+
+                // Apply Calculated Columns
+                if (projectData.calculations && projectData.calculations.length > 0) {
+                    console.log(`[Analytics] Processing ${projectData.calculations.length} calculated columns...`);
+
+                    masterData.forEach(item => {
+                        projectData.calculations.forEach(calc => {
+                            try {
+                                // Replace [ColumnName] with actual values
+                                let formula = calc.formula;
+                                const columnRefs = formula.match(/\[(.*?)\]/g);
+
+                                if (columnRefs) {
+                                    columnRefs.forEach(ref => {
+                                        const colName = ref.replace('[', '').replace(']', '');
+                                        const val = parseFloat(item[colName] || 0);
+                                        formula = formula.replace(ref, isNaN(val) ? 0 : val);
+                                    });
+                                }
+
+                                // Safe evaluation using Function constructor
+                                // Only allow basic math characters to prevent injection
+                                if (/^[\d+\-*/().\s]+$/.test(formula)) {
+                                    // eslint-disable-next-line no-new-func
+                                    const result = new Function('return ' + formula)();
+                                    item[calc.name] = parseFloat(result.toFixed(2)); // Round to 2 decimals
+                                } else {
+                                    item[calc.name] = null; // Invalid characters
+                                    // console.warn(`[Analytics] Invalid characters in formula for ${calc.name}: ${calc.formula}`);
+                                }
+                            } catch (err) {
+                                item[calc.name] = null; // Error in calculation
+                                // console.error(`[Analytics] Calc Error ${calc.name}:`, err);
+                            }
+                        });
+                    });
+                }
+
+                // Log Match Results
+                sourceConfigs.forEach(src => {
+                    console.log(`[Analytics] Source "${src.config.fileName}": Matched ${src.matchCount || 0} / ${src.index.size} rows to model.`);
+                    if ((src.matchCount || 0) === 0) {
+                        console.warn(`[Analytics] WARNING: Source "${src.config.fileName}" had ZERO matches. Check mapping keys: Model[${src.modelKey}] vs File[${src.config?.mapping?.fileKey}]`);
+                    }
+                });
+
+                // DEBUG: Check first 5 items for external data
+                if (masterData.length > 0) {
+                    console.log('[Analytics] Master Data Sample (First 3):', masterData.slice(0, 3));
+                    const keys = Object.keys(masterData[0]);
+                    console.log('[Analytics] Keys on first item:', keys);
+                }
+
+                console.log(`[Analytics] Master Data Built. ${masterData.length} records.`);
+                resolve(masterData);
+
+            }, (err) => {
+                console.error('[Analytics] Failed to fetch bulk properties:', err);
+                resolve([]);
+            });
+        });
+    }
+
+    /**
+     * Synchronous Aggregation from Master Data
+     */
+    aggregateFromMasterData(masterData, propertyName, conditions = [], logicalOperator = 'AND', sumProperty = null, scopeDbIds = null) {
+        const aggregation = {};
+
+        // Filter by Scope first if provided, otherwise use all
+        let targetData = masterData;
+        if (scopeDbIds && scopeDbIds.length > 0) {
+            const scopeSet = new Set(scopeDbIds);
+            targetData = masterData.filter(d => scopeSet.has(d.dbId));
+        }
+
+        targetData.forEach(item => {
+            // Check Conditions
+            let passed = true;
+            if (conditions.length > 0) {
+                const conditionResults = conditions.map(condition => {
+                    let val = item[condition.attribute];
+                    if (val === undefined || val === null) val = 'Undefined';
+                    val = String(val);
+
+                    switch (condition.operator) {
+                        case 'equals': return val === condition.value;
+                        case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
+                        case 'not_equals': return val !== condition.value;
+                        default: return true;
+                    }
+                });
+                passed = logicalOperator === 'OR' ? conditionResults.some(r => r) : conditionResults.every(r => r);
+            }
+
+            if (passed) {
+                const value = item[propertyName] !== undefined ? item[propertyName] : 'Undefined';
+
+                if (!aggregation[value]) {
+                    aggregation[value] = { dbIds: [], sum: 0, count: 0 };
+                }
+                aggregation[value].dbIds.push(item.dbId);
+                aggregation[value].count++;
+
+                if (sumProperty) {
+                    const rawVal = item[sumProperty];
+                    const sumVal = parseFloat(rawVal);
+                    // if (Math.random() < 0.001) console.log(`[Analytics] Aggregating ${sumProperty}:`, rawVal, '->', sumVal);
+
+                    if (!isNaN(sumVal)) {
+                        aggregation[value].sum += sumVal;
+                    }
+                }
+            }
+        });
+
+        return aggregation;
+    }
+
+    /**
+     * Synchronous Table Data from Master Data
+     */
+    getTableDataFromMaster(masterData, propertyNames, conditions = [], logicalOperator = 'AND') {
+        const aggregation = {}; // Key: JSON string of values, Value: Array of dbIds
+
+        masterData.forEach(item => {
+            // Check Conditions
+            let passed = true;
+            if (conditions.length > 0) {
+                const conditionResults = conditions.map(condition => {
+                    let val = item[condition.attribute];
+                    if (val === undefined || val === null) val = 'Undefined';
+                    val = String(val);
+
+                    switch (condition.operator) {
+                        case 'equals': return val === condition.value;
+                        case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
+                        case 'not_equals': return val !== condition.value;
+                        default: return true;
+                    }
+                });
+                passed = logicalOperator === 'OR' ? conditionResults.some(r => r) : conditionResults.every(r => r);
+            }
+
+            if (passed) {
+                const values = propertyNames.map(name => {
+                    return item[name] !== undefined ? item[name] : 'Undefined';
+                });
+                const key = JSON.stringify(values);
+
+                if (!aggregation[key]) aggregation[key] = [];
+                aggregation[key].push(item.dbId);
+            }
+        });
+
+        return this.getTableData(aggregation, propertyNames);
     }
 }
 

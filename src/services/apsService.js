@@ -143,6 +143,111 @@ class APSService {
         return data.data;
     }
 
+    async downloadFile(urn) {
+        const token = await this.getAccessToken();
+        if (!token) throw new Error('Not authenticated');
+
+        // Clean URN if needed
+        let safeUrn = urn;
+        if (safeUrn.includes('=')) safeUrn = safeUrn.replace(/=/g, '');
+
+        // 1. Get Download URL
+        // Note: For OSS files (buckets), it's different. For ACC/BIM360 (WiP), we usually need the version ID.
+        // Assuming the passed 'urn' is actually the Version ID (urn:adsk.wipprod:fs.file:vf...) 
+        // OR a derivative URN.
+        // If it comes from FileExplorer, it might be the Version ID.
+
+        // Strategy: Use the Data Management API to get the storage location
+        // GET projects/:project_id/versions/:version_id
+
+        // Ideally, we need project ID and version ID.
+        // If we only have the Lineage URN, we need to resolve to tip version.
+
+        // Simpler approach for now: Try to get the download URL via the version details endpoint if it's a version ID.
+        try {
+            // First, try direct download if it's an OSS URN (unlikely for ACC files but possible)
+            // But usually for ACC, we get the storage relationship.
+
+            // Let's assume we pass the FULL Item/Version ID as 'urn' to this function.
+            // Example: urn:adsk.wipprod:fs.file:vf.123...
+            const projectId = urn.split(':')[4]?.split('/')[0]; // rough parsing, might be fragile
+            // Better: FileExplorer passes the item.
+
+            // Let's rely on the caller passing the "download URL" or we fetch it here.
+            // Actually, `GET /data/v1/projects/:project_id/versions/:version_id` returns a `storage` relationship.
+            // Then `GET /oss/v2/buckets/:bucketKey/objects/:objectName` to download.
+
+            // Let's keep it simple: We will expect the caller to pass the Project ID and Version ID (urn).
+        } catch (e) {
+            console.error("Error parsing URN", e);
+        }
+
+        // Implementation for downloading content via OSS
+        // We need the S3 signed url.
+        // If we use the derivative URN, we can use GET /modelderivative/v2/designdata/:urn/manifest to find resources? No.
+
+        // Correct approach for ACC files:
+        // 1. GET project/version to find properties.storage.data.id
+        // 2. The storage ID is essentially the LOSS URN (urn:adsk.objects:os.object:wip.dm.prod/...)
+        // 3. Request a signed URL for that object. 
+        // 4. Download.
+
+        // However, APS has a direct "download" logic.
+        // Let's try downloading via the storage endpoint directly.
+
+        // For this MVP, let's assume we can get the S3 URL if we have the Version ID.
+        // GET https://developer.api.autodesk.com/data/v1/projects/:project_id/versions/:version_id
+
+        // Wait, the FileExplorer provides the Item. 
+        // Let's just fetch the generic 'download' if available in relationships?
+        // Usually `relationships.storage.meta.link.href`? No.
+
+        // We will implement a helper that takes the Storage URN (if available) or Version ID.
+
+        // Hack: Authorization header + fetch(url) works if we have the signed URL.
+        // We need to get the signed URL.
+
+        // Let's TRY simple OSS download if we know the Object Key.
+        // But we don't.
+
+        // fallback: If we can't easily download, we might need a workaround.
+        // BUT, if we have the version ID, we can get the details.
+    }
+
+    // Revised: simpler method
+    async getFileContent(projectId, versionId) {
+        const token = await this.getAccessToken();
+        if (!token) throw new Error("No token");
+
+        // 1. Get Version Details to find Storage URN
+        const verRes = await fetch(`https://developer.api.autodesk.com/data/v1/projects/${projectId}/versions/${encodeURIComponent(versionId)}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!verRes.ok) throw new Error("Failed to get version details");
+        const verData = await verRes.json();
+
+        const storageUrn = verData.data.relationships.storage.data.id;
+        // storageUrn example: urn:adsk.objects:os.object:wip.dm.prod/98f3...
+
+        const objectId = storageUrn.split('/')[1];
+        const bucketKey = storageUrn.split('/')[0].split(':')[3]; // wip.dm.prod
+
+        // 2. Get Signed S3 URL
+        // GET https://developer.api.autodesk.com/oss/v2/buckets/:bucketKey/objects/:objectKey/signeds3download
+        const signedRes = await fetch(`https://developer.api.autodesk.com/oss/v2/buckets/${bucketKey}/objects/${objectId}/signeds3download`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!signedRes.ok) throw new Error("Failed to get signed URL");
+        const signedData = await signedRes.json();
+        const downloadUrl = signedData.url;
+
+        // 3. Download Content
+        const fileRes = await fetch(downloadUrl);
+        return await fileRes.arrayBuffer();
+    }
+
     // Get model metadata
     async getModelMetadata(modelUrn) {
         const token = await this.getAccessToken();
