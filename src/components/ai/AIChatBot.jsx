@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Draggable from 'react-draggable';
+import { X, Minus, Maximize2, Send, MessageSquare, Settings as SettingsIcon } from 'lucide-react';
 import aiService from '../../services/aiService';
 import analyticsService from '../../services/analyticsService';
 
-const AIChatBot = ({ viewer, onDataClick }) => {
+const AIChatBot = ({ viewer, onDataClick, isOpen, onClose, isFloating = true }) => {
     const [messages, setMessages] = useState([
         { role: 'assistant', text: "Hello! I'm your BIM assistant. Ask me to find or filter elements in the 3D model using natural language." }
     ]);
@@ -12,7 +14,9 @@ const AIChatBot = ({ viewer, onDataClick }) => {
     const [showKeyInput, setShowKeyInput] = useState(!aiService.getApiKey());
     const [apiKey, setApiKey] = useState(aiService.getApiKey());
     const [availableProps, setAvailableProps] = useState([]);
+    const [isMinimized, setIsMinimized] = useState(false);
     const scrollRef = useRef(null);
+    const nodeRef = useRef(null);
 
     useEffect(() => {
         if (viewer) {
@@ -97,42 +101,81 @@ const AIChatBot = ({ viewer, onDataClick }) => {
         }
     };
 
-    return (
+    if (!isOpen && isFloating) return null;
+
+    const chatContent = (
         <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={isFloating ? { opacity: 0, scale: 0.9, y: 20 } : { opacity: 0, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={isFloating ? { opacity: 0, scale: 0.9, y: 20 } : { opacity: 0, y: 20 }}
             style={{
-                height: '100%',
+                height: isMinimized ? 'auto' : (isFloating ? '500px' : '100%'),
+                width: isFloating ? '380px' : '100%',
                 display: 'flex',
                 flexDirection: 'column',
-                background: 'var(--color-bg-elevated)',
-                borderRadius: 'var(--radius-md)',
+                background: 'rgba(13, 17, 23, 0.95)',
+                backdropFilter: 'blur(12px)',
+                borderRadius: '16px',
                 overflow: 'hidden',
-                border: '1px solid var(--color-border)'
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                boxShadow: isFloating ? '0 20px 50px rgba(0,0,0,0.5)' : 'none',
+                position: isFloating ? 'fixed' : 'relative',
+                right: isFloating ? '24px' : 'auto',
+                bottom: isFloating ? '24px' : 'auto',
+                zIndex: 10000,
+                color: 'white'
             }}
         >
-            {/* Header */}
-            <div style={{
-                padding: 'var(--spacing-md)',
-                background: 'rgba(29, 185, 84, 0.1)',
-                borderBottom: '1px solid var(--color-border)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
-                    <span style={{ fontSize: '20px' }}>🤖</span>
+            {/* Header / Drag Handle */}
+            <div
+                className="chat-header"
+                style={{
+                    padding: '16px',
+                    background: 'rgba(29, 185, 84, 0.15)',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    cursor: isFloating ? 'move' : 'default'
+                }}
+            >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="w-8 h-8 rounded-full bg-[var(--color-primary)] flex items-center justify-center">
+                        <MessageSquare className="w-5 h-5 text-black" />
+                    </div>
                     <div>
-                        <div style={{ fontSize: '14px', fontWeight: '600', color: 'white' }}>BIM Assistant</div>
-                        <div style={{ fontSize: '10px', color: 'var(--color-primary)' }}>Powered by Gemini 1.5</div>
+                        <div style={{ fontSize: '14px', fontWeight: '700', letterSpacing: '0.025em' }}>BIM ASSISTANT</div>
+                        <div style={{ fontSize: '10px', color: 'var(--color-primary)', opacity: 0.8 }}>Powered by Gemini 1.5</div>
                     </div>
                 </div>
-                <button
-                    onClick={() => setShowKeyInput(true)}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--color-text-subdued)', cursor: 'pointer', fontSize: '12px' }}
-                >
-                    ⚙️ API Key
-                </button>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                        onClick={() => setShowKeyInput(!showKeyInput)}
+                        style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer' }}
+                        title="Settings"
+                    >
+                        <SettingsIcon size={16} />
+                    </button>
+                    {isFloating && (
+                        <>
+                            <button
+                                onClick={onClose}
+                                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer' }}
+                                title="Minimize to bubble"
+                            >
+                                <Minus size={16} />
+                            </button>
+                            <button
+                                onClick={onClose}
+                                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer' }}
+                                title="Close"
+                            >
+                                <X size={16} />
+                            </button>
+                        </>
+                    )}
+                </div>
             </div>
 
             {/* Chat Messages */}
@@ -141,10 +184,11 @@ const AIChatBot = ({ viewer, onDataClick }) => {
                 style={{
                     flex: 1,
                     overflowY: 'auto',
-                    padding: 'var(--spacing-md)',
+                    padding: '20px',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 'var(--spacing-md)'
+                    gap: '16px',
+                    background: 'rgba(10, 10, 15, 0.4)'
                 }}
             >
                 <AnimatePresence>
@@ -155,27 +199,27 @@ const AIChatBot = ({ viewer, onDataClick }) => {
                             exit={{ opacity: 0, height: 0 }}
                             style={{
                                 background: 'rgba(255,255,255,0.05)',
-                                padding: '12px',
-                                borderRadius: '8px',
-                                marginBottom: '12px'
+                                padding: '16px',
+                                borderRadius: '12px',
+                                marginBottom: '8px',
+                                border: '1px solid rgba(255,255,255,0.1)'
                             }}
                         >
-                            <label style={{ fontSize: '10px', color: 'var(--color-text-subdued)', display: 'block', marginBottom: '8px' }}>GOOGLE GEMINI API KEY</label>
+                            <label style={{ fontSize: '10px', fontWeight: '800', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Gemini API Key</label>
                             <div style={{ display: 'flex', gap: '8px' }}>
                                 <input
                                     type="password"
                                     value={apiKey}
                                     onChange={(e) => setApiKey(e.target.value)}
                                     placeholder="Enter API Key..."
-                                    style={{ flex: 1, padding: '8px', background: '#000', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'white', fontSize: '12px' }}
+                                    style={{ flex: 1, padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', fontSize: '12px' }}
                                 />
                                 <button
                                     onClick={handleSaveKey}
-                                    className="btn btn-primary"
-                                    style={{ padding: '4px 12px', fontSize: '12px' }}
-                                >Save</button>
+                                    className="px-4 py-2 bg-[var(--color-primary)] text-black rounded-lg text-xs font-bold hover:bg-opacity-90 transition-all"
+                                >SAVE</button>
                             </div>
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--color-primary)', marginTop: '8px', display: 'inline-block' }}>Get a free key here</a>
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--color-primary)', marginTop: '10px', display: 'inline-block', textDecoration: 'none' }}>Get a free key here →</a>
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -188,17 +232,19 @@ const AIChatBot = ({ viewer, onDataClick }) => {
                         style={{
                             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                             maxWidth: '85%',
-                            padding: '10px 14px',
-                            background: msg.role === 'user' ? 'var(--color-primary)' : 'rgba(255,255,255,0.1)',
+                            padding: '12px 16px',
+                            background: msg.role === 'user' ? 'var(--color-primary)' : 'rgba(255,255,255,0.08)',
                             borderRadius: msg.role === 'user' ? '18px 18px 2px 18px' : '18px 18px 18px 2px',
                             color: msg.role === 'user' ? '#000' : 'white',
                             fontSize: '13px',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                            lineHeight: '1.5',
+                            boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+                            border: msg.role === 'assistant' ? '1px solid rgba(255,255,255,0.05)' : 'none'
                         }}
                     >
                         {msg.text}
                         {msg.filters && msg.filters.length > 0 && (
-                            <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.8, borderLeft: '2px solid rgba(255,255,255,0.3)', paddingLeft: '8px' }}>
+                            <div style={{ marginTop: '10px', fontSize: '11px', opacity: 0.7, borderLeft: '2px solid rgba(255,255,255,0.3)', paddingLeft: '10px', fontStyle: 'italic' }}>
                                 Searching: {msg.filters[0].attribute} {msg.filters[0].operator} {msg.filters[0].value}
                             </div>
                         )}
@@ -216,29 +262,28 @@ const AIChatBot = ({ viewer, onDataClick }) => {
             <form
                 onSubmit={handleSendMessage}
                 style={{
-                    padding: 'var(--spacing-md)',
-                    borderTop: '1px solid var(--color-border)',
+                    padding: '16px',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
                     display: 'flex',
-                    gap: 'var(--spacing-sm)'
+                    gap: '10px',
+                    background: 'rgba(13, 17, 23, 0.8)'
                 }}
             >
                 <input
                     type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
-                    placeholder="Search model (e.g. 'find all steel doors')..."
+                    placeholder="Ask BIM assistant..."
                     style={{
                         flex: 1,
                         background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '20px',
-                        padding: '10px 16px',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '24px',
+                        padding: '10px 18px',
                         color: 'white',
                         fontSize: '13px',
                         outline: 'none'
                     }}
-                    onFocus={(e) => e.target.style.borderColor = 'var(--color-primary)'}
-                    onBlur={(e) => e.target.style.borderColor = 'var(--color-border)'}
                 />
                 <motion.button
                     whileHover={{ scale: 1.05 }}
@@ -246,8 +291,8 @@ const AIChatBot = ({ viewer, onDataClick }) => {
                     type="submit"
                     disabled={loading || !inputValue.trim()}
                     style={{
-                        width: '36px',
-                        height: '36px',
+                        width: '38px',
+                        height: '38px',
                         borderRadius: '50%',
                         background: 'var(--color-primary)',
                         border: 'none',
@@ -255,15 +300,38 @@ const AIChatBot = ({ viewer, onDataClick }) => {
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '16px'
+                        justifyContent: 'center'
                     }}
                 >
-                    ✈️
+                    <Send size={18} />
                 </motion.button>
             </form>
         </motion.div>
     );
+
+    if (isFloating) {
+        return (
+            <Draggable
+                nodeRef={nodeRef}
+                handle=".chat-header"
+                bounds="body"
+            >
+                <div
+                    ref={nodeRef}
+                    style={{
+                        position: 'fixed',
+                        bottom: '24px',
+                        right: '24px',
+                        zIndex: 10000
+                    }}
+                >
+                    {chatContent}
+                </div>
+            </Draggable>
+        );
+    }
+
+    return chatContent;
 };
 
 export default AIChatBot;

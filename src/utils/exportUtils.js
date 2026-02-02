@@ -4,10 +4,12 @@
  */
 export const exportUtils = {
     /**
+    /**
      * Generates a standalone HTML string for a dashboard
      * @param {Object} dashboard - The dashboard configuration object
+     * @param {Object} componentData - Pre-calculated data snapshot for components
      */
-    generateDashboardHTML(dashboard) {
+    generateDashboardHTML(dashboard, componentData) {
         // Defensive check for dashboard data
         const safeDashboard = {
             name: dashboard.name || 'Exported Dashboard',
@@ -91,8 +93,11 @@ export const exportUtils = {
 <body>
     <div id="root"></div>
 
+    <div id="root"></div>
+
     <script>
         const dashboardData = ${dashboardJson};
+        const snapshotData = ${JSON.stringify(componentData || {})};
 
         function DashboardApp() {
             const [token, setToken] = React.useState('');
@@ -154,7 +159,8 @@ export const exportUtils = {
                                 token, 
                                 viewer: modelLoaded ? viewerInstance : null,
                                 onViewerInit: setViewerInstance,
-                                onModelReady: () => setModelLoaded(true)
+                                onModelReady: () => setModelLoaded(true),
+                                snapshotData: snapshotData || {}
                             })
                         );
                     })
@@ -162,7 +168,7 @@ export const exportUtils = {
             );
         }
 
-        function DashboardComponent({ comp, token, viewer, onViewerInit, onModelReady }) {
+        function DashboardComponent({ comp, token, viewer, onViewerInit, onModelReady, snapshotData }) {
             const canvasRef = React.useRef(null);
             const [data, setData] = React.useState(null);
             const [loading, setLoading] = React.useState(false);
@@ -181,13 +187,32 @@ export const exportUtils = {
 
             // Data loading logic for charts/tables/kpis
             React.useEffect(() => {
-                if (!viewer || comp.type === 'viewer') return;
+                if (comp.type === 'viewer') return;
                 
                 const loadData = async () => {
                     setLoading(true);
                     try {
+                        // Priority 1: Use Snapshot Data (Offline / Pre-calculated)
+                        if (snapshotData && snapshotData[comp.id]) {
+                            const snap = snapshotData[comp.id];
+                            setData(snap);
+                            
+                            if (canvasRef.current && (comp.type === 'pie' || comp.type === 'bar' || comp.type === 'line')) {
+                                renderChart(comp, canvasRef.current, snap);
+                            }
+                            setLoading(false);
+                            return;
+                        }
+
+                        // Priority 2: Runtime Viewer Calculation (Only if viewer exists)
+                        if (viewer) {
+                            // ... (Legacy viewer aggregation logic would go here if needed)
+                            // For standalone export without API access, we rely mainly on snapshot or sample data
+                        }
+                        
+                        // Fallback: Sample Data if no snapshot
+                        // ...
                         const attribute = config.attribute || 'Category';
-                        await new Promise(r => setTimeout(r, 500));
                         
                         if (comp.type === 'kpi') {
                             setData({ value: '1,248', label: attribute, subtitle: 'Total Elements' });
@@ -210,7 +235,7 @@ export const exportUtils = {
                 };
 
                 loadData();
-            }, [viewer, comp.id]);
+            }, [viewer, comp.id, JSON.stringify(snapshotData[comp.id])]);
 
             if (comp.type === 'viewer') {
                 return React.createElement('div', { 
@@ -325,9 +350,9 @@ export const exportUtils = {
      * Triggers a download of the dashboard HTML
      * @param {Object} dashboard - Dashboard config
      */
-    downloadDashboard(dashboard) {
+    downloadDashboard(dashboard, componentData) {
         try {
-            const html = this.generateDashboardHTML(dashboard);
+            const html = this.generateDashboardHTML(dashboard, componentData);
             const blob = new Blob([html], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');

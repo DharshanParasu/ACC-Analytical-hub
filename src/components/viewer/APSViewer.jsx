@@ -26,23 +26,35 @@ const APSViewer = ({ config = {}, modelUrn, modelName, onViewerReady, onModelLoa
             }
         };
 
+        let viewerInstance = null;
+
         window.Autodesk.Viewing.Initializer(options, () => {
             const container = viewerContainer.current;
             if (!container) return;
-            const instance = new window.Autodesk.Viewing.GuiViewer3D(container);
-            instance.start();
-            setViewer(instance);
+            // Use GuiViewer3D for toolbar support
+            viewerInstance = new window.Autodesk.Viewing.GuiViewer3D(container);
+            viewerInstance.start();
+            setViewer(viewerInstance);
 
             if (onViewerReady) {
-                onViewerReady(instance);
+                onViewerReady(viewerInstance);
             }
         });
 
+        // Add ResizeObserver to handle container resizing
+        const resizeObserver = new ResizeObserver(() => {
+            if (viewerInstance) {
+                viewerInstance.resize();
+            }
+        });
+        resizeObserver.observe(viewerContainer.current);
+
         return () => {
-            if (viewer) {
-                viewer.finish();
+            if (viewerInstance) {
+                viewerInstance.finish();
                 setViewer(null);
             }
+            resizeObserver.disconnect();
         };
     }, []);
 
@@ -200,27 +212,14 @@ const APSViewer = ({ config = {}, modelUrn, modelName, onViewerReady, onModelLoa
                             )}
 
                             {!modelUrn && !error && (
-                                <>
-                                    <div style={{
-                                        fontSize: 'var(--font-size-sm)',
-                                        color: 'var(--color-text-subdued)',
-                                        marginBottom: 'var(--spacing-lg)',
-                                        maxWidth: '300px'
-                                    }}>
-                                        Please select a 3D model from the dashboard settings to view it here.
-                                    </div>
-                                    {onRequestFileBrowse && (
-                                        <motion.button
-                                            whileHover={{ scale: 1.04 }}
-                                            whileTap={{ scale: 0.96 }}
-                                            onClick={onRequestFileBrowse}
-                                            className="btn btn-primary"
-                                            style={{ fontSize: 'var(--font-size-sm)' }}
-                                        >
-                                            Select Model
-                                        </motion.button>
-                                    )}
-                                </>
+                                <div style={{
+                                    fontSize: 'var(--font-size-sm)',
+                                    color: 'var(--color-text-subdued)',
+                                    marginBottom: 'var(--spacing-lg)',
+                                    maxWidth: '300px'
+                                }}>
+                                    Please select a 3D model from the dashboard settings to view it here.
+                                </div>
                             )}
                         </div>
                     )}

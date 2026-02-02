@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
+import { Search, Settings } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
-const Header = ({ user, onLogin }) => {
+const Header = ({ user, onLogin, onConfigure }) => {
     const location = useLocation();
 
     const getPageTitle = () => {
@@ -14,104 +15,58 @@ const Header = ({ user, onLogin }) => {
     };
 
     return (
-        <header
-            style={{
-                height: '64px',
-                background: 'var(--color-bg-base)',
-                padding: '0 var(--spacing-xl)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                position: 'sticky',
-                top: 0,
-                zIndex: 'var(--z-sticky)',
-                borderBottom: '1px solid var(--color-border-subtle)'
-            }}
-        >
+        <header className="h-16 bg-[var(--color-bg-base)]/80 backdrop-blur-md px-8 flex items-center justify-between sticky top-0 z-[1020] border-b border-[var(--color-border)] transition-colors duration-200">
             <div>
-                <h2
-                    style={{
-                        fontSize: 'var(--font-size-2xl)',
-                        fontWeight: 'var(--font-weight-black)',
-                        color: 'var(--color-text-base)',
-                        margin: 0
-                    }}
-                >
+                <h2 className="text-2xl font-black text-[var(--color-text-base)] m-0 tracking-tight">
                     {getPageTitle()}
                 </h2>
             </div>
 
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--spacing-md)'
-            }}>
+            <div className="flex items-center gap-4">
+                <button
+                    onClick={onConfigure}
+                    className="p-2 rounded-full hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-base)] transition-colors"
+                    title="Settings"
+                >
+                    <Settings className="w-5 h-5" />
+                </button>
                 <ThemeToggle />
 
                 {/* Search Bar */}
-                <div
-                    style={{
-                        position: 'relative',
-                        width: '360px'
-                    }}
-                >
+                <div className="relative w-[360px] group">
                     <input
                         type="text"
                         placeholder="Search dashboards..."
-                        className="input"
-                        style={{
-                            paddingLeft: '40px',
-                            background: 'var(--color-bg-elevated)',
-                            border: 'none'
-                        }}
+                        className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-full text-[var(--color-text-base)] placeholder-[var(--color-text-muted)] focus:outline-none focus:bg-[var(--color-bg-surface)] focus:border-[var(--color-border-hover)] transition-all"
                     />
-                    <span style={{
-                        position: 'absolute',
-                        left: '12px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        fontSize: '18px',
-                        color: 'var(--color-text-subdued)'
-                    }}>
-                        🔍
-                    </span>
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center">
+                        <Search className="w-5 h-5 text-[var(--color-text-muted)] group-focus-within:text-[var(--color-text-base)] transition-colors" />
+                    </div>
                 </div>
 
                 {/* User Identity / Login */}
                 {user ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>{user.userName}</span>
-                            <span style={{ fontSize: '0.7rem', color: 'var(--color-text-subdued)' }}>{user.emailId}</span>
+                    <div className="flex items-center gap-3 pl-4 border-l border-[var(--color-border)]">
+                        <div className="text-right flex flex-col">
+                            <span className="text-sm font-bold text-[var(--color-text-base)] leading-tight">{user.userName}</span>
+                            <span className="text-[10px] text-[var(--color-text-muted)]">{user.emailId}</span>
                         </div>
                         <motion.div
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            style={{
-                                width: '36px',
-                                height: '36px',
-                                borderRadius: 'var(--radius-full)',
-                                background: 'var(--color-primary)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                overflow: 'hidden',
-                                cursor: 'pointer',
-                                border: '2px solid rgba(255,255,255,0.1)'
-                            }}
+                            className="w-9 h-9 rounded-full bg-lime-400 flex items-center justify-center overflow-hidden cursor-pointer border-2 border-[var(--color-border)] shadow-lg"
                         >
                             {user.profileImages?.sizeX40 ? (
-                                <img src={user.profileImages.sizeX40} alt="profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                <img src={user.profileImages.sizeX40} alt="profile" className="w-full h-full object-cover" />
                             ) : (
-                                <span style={{ color: 'black', fontWeight: 'bold' }}>{user.userName?.charAt(0)}</span>
+                                <span className="text-black font-bold">{user.userName?.charAt(0)}</span>
                             )}
                         </motion.div>
                     </div>
                 ) : (
                     <button
                         onClick={onLogin}
-                        className="btn btn-primary"
-                        style={{ fontSize: '0.85rem', padding: '6px 16px' }}
+                        className="btn btn-primary text-sm py-1.5 px-4 rounded-full"
                     >
                         Login
                     </button>

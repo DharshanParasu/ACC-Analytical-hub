@@ -9,6 +9,46 @@ class AnalyticsService {
     }
 
     /**
+     * Extracts a unit suffix from a string value (e.g. "150.00 m2" -> "m2")
+     */
+    extractUnit(val) {
+        if (typeof val !== 'string') return null;
+        // Match trailing non-numeric characters, ignoring dots/commas commonly used in numbers
+        const match = val.match(/[^\d.,\s-]+$/);
+        return match ? match[0] : null;
+    }
+
+    /**
+     * Centralized numeric formatter with exact/scaled options and unit support
+     */
+    formatValue(val, options = {}) {
+        const { exact = true, decimals = 2, unit = '' } = options;
+        if (val === null || val === undefined) return '0';
+
+        let numericVal = typeof val === 'number' ? val : parseFloat(val);
+        if (isNaN(numericVal)) return String(val);
+
+        let result;
+        if (exact) {
+            result = numericVal.toLocaleString(undefined, {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+        } else {
+            // Scaled (K/M) formatting
+            if (Math.abs(numericVal) >= 1000000) {
+                result = (numericVal / 1000000).toFixed(1) + 'M';
+            } else if (Math.abs(numericVal) >= 1000) {
+                result = (numericVal / 1000).toFixed(1) + 'K';
+            } else {
+                result = numericVal.toFixed(decimals);
+            }
+        }
+
+        return unit ? `${result} ${unit}` : result;
+    }
+
+    /**
      * Extracts all properties from the model using a multi-layered approach:
      * 1. AEC Data Model (GraphQL) - Direct cloud-to-cloud BIM data
      * 2. Viewer PDB enumAttributes - Standard viewer-side DB scan
@@ -244,6 +284,8 @@ class AnalyticsService {
 
                 viewer.model.getBulkProperties(targetDbIds, uniqueAttrs, (results) => {
                     const aggregation = {};
+                    let detectedUnit = null;
+
                     if (!results) return resolve({});
 
                     results.forEach(res => {
@@ -277,6 +319,11 @@ class AnalyticsService {
                             }
 
                             if (value !== null) {
+                                // Extract unit if not already found
+                                if (!detectedUnit) {
+                                    detectedUnit = this.extractUnit(String(value));
+                                }
+
                                 if (!aggregation[value]) {
                                     aggregation[value] = { dbIds: [], sum: 0, count: 0 };
                                 }
@@ -299,7 +346,11 @@ class AnalyticsService {
                         }
                     });
 
-                    resolve(aggregation);
+                    // Wrap results with metadata
+                    resolve({
+                        data: aggregation,
+                        unit: detectedUnit
+                    });
                 }, (err) => {
                     console.error("[Analytics] Bulk properties failed", err);
                     resolve({});
@@ -544,7 +595,14 @@ class AnalyticsService {
             });
         }
 
-        // 3. Merge and Sort
+        // 3. Get Calculated Columns
+        if (projectData && projectData.calculations) {
+            projectData.calculations.forEach(calc => {
+                if (calc.name) externalProps.add(calc.name);
+            });
+        }
+
+        // 4. Merge and Sort
         const combined = new Set([...modelProps, ...externalProps]);
         return Array.from(combined).sort();
     }
@@ -583,13 +641,13 @@ class AnalyticsService {
      * Fetches ALL properties for ALL elements and merges with external data sources.
      * @returns {Promise<Array>} Array of unified data objects for each object in the model.
      */
-    async getAllData(viewer, projectData) {
+    async getAllData(viewer, projectData, modelPropertyNames = null) {
         return new Promise((resolve) => {
-            if (!viewer || !viewer.model) return resolve([]);
+            if (!viewer || !viewer.model) return resolve({ results: [], sourceStats: {}, error: 'Viewer or Model not ready' });
 
             console.log('[Analytics] Starting Master Data Fetch...');
             const instanceTree = viewer.model.getInstanceTree();
-            if (!instanceTree) return resolve([]);
+            if (!instanceTree) return resolve({ results: [], sourceStats: {}, error: 'Model instance tree not available' });
 
             // 1. Get all Leaf Node DBIDs
             const allDbIds = [];
@@ -599,7 +657,7 @@ class AnalyticsService {
                 }
             }, true);
 
-            if (allDbIds.length === 0) return resolve([]);
+            if (allDbIds.length === 0) return resolve({ results: [], sourceStats: {}, error: 'No elements found in model' });
             console.log(`[Analytics] Found ${allDbIds.length} elements. Fetching properties...`);
 
             // 2. Prepare External Data Indices
@@ -607,7 +665,7 @@ class AnalyticsService {
             const sourceConfigs = [];
 
             if (projectData && projectData.sources) {
-                Object.values(projectData.sources).forEach(source => {
+                Object.entries(projectData.sources).forEach(([key, source]) => {
                     if (source.data && source.mapping && source.mapping.modelKey && source.mapping.fileKey) {
                         const index = new Map();
                         source.data.forEach(row => {
@@ -618,15 +676,19 @@ class AnalyticsService {
                         sourceConfigs.push({
                             modelKey: source.mapping.modelKey,
                             index: index,
-                            config: source
+                            config: source,
+                            sourceKey: key
                         });
                     }
                 });
             }
 
-            // 3. Fetch ALL Properties for ALL Nodes
-            // We pass null to getBulkProperties to request ALL properties.
-            viewer.model.getBulkProperties(allDbIds, null, (results) => {
+            // 3. Fetch Properties for All Nodes
+            // If modelPropertyNames is null/empty, we fetch ALL properties (pass null).
+            // If explicit list provided, we only fetch those.
+            const propsToFetch = (modelPropertyNames && modelPropertyNames.length > 0) ? modelPropertyNames : null;
+
+            viewer.model.getBulkProperties(allDbIds, propsToFetch, (results) => {
                 const masterData = [];
 
                 results.forEach(res => {
@@ -705,11 +767,26 @@ class AnalyticsService {
                 }
 
                 console.log(`[Analytics] Master Data Built. ${masterData.length} records.`);
-                resolve(masterData);
+
+                // Collect stats for each source
+                const sourceStats = {};
+                sourceConfigs.forEach(src => {
+                    sourceStats[src.sourceKey] = {
+                        matchCount: src.matchCount || 0,
+                        totalRows: src.index.size,
+                        fileName: src.config.fileName
+                    };
+                });
+
+                resolve({
+                    results: masterData,
+                    sourceStats: sourceStats,
+                    error: null
+                });
 
             }, (err) => {
                 console.error('[Analytics] Failed to fetch bulk properties:', err);
-                resolve([]);
+                resolve({ results: [], sourceStats: {}, error: 'APS Bulk Property Fetch Error: ' + (err?.message || err || 'Unknown error') });
             });
         });
     }
@@ -737,9 +814,21 @@ class AnalyticsService {
                     val = String(val);
 
                     switch (condition.operator) {
-                        case 'equals': return val === condition.value;
-                        case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
-                        case 'not_equals': return val !== condition.value;
+                        case 'equals':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.includes(val);
+                            }
+                            return val === condition.value;
+                        case 'contains':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.some(v => val.toLowerCase().includes(v.toLowerCase()));
+                            }
+                            return val.toLowerCase().includes(condition.value.toLowerCase());
+                        case 'not_equals':
+                            if (Array.isArray(condition.value)) {
+                                return !condition.value.includes(val);
+                            }
+                            return val !== condition.value;
                         default: return true;
                     }
                 });
@@ -747,7 +836,11 @@ class AnalyticsService {
             }
 
             if (passed) {
-                const value = item[propertyName] !== undefined ? item[propertyName] : 'Undefined';
+                let rawValue = item[propertyName] !== undefined ? item[propertyName] : 'Undefined';
+
+                // Format Date objects for consistent keys
+                const displayValue = rawValue instanceof Date ? rawValue.toLocaleDateString() : rawValue;
+                const value = displayValue;
 
                 if (!aggregation[value]) {
                     aggregation[value] = { dbIds: [], sum: 0, count: 0 };
@@ -758,7 +851,6 @@ class AnalyticsService {
                 if (sumProperty) {
                     const rawVal = item[sumProperty];
                     const sumVal = parseFloat(rawVal);
-                    // if (Math.random() < 0.001) console.log(`[Analytics] Aggregating ${sumProperty}:`, rawVal, '->', sumVal);
 
                     if (!isNaN(sumVal)) {
                         aggregation[value].sum += sumVal;
@@ -767,7 +859,81 @@ class AnalyticsService {
             }
         });
 
-        return aggregation;
+        // For master data, unit extraction is harder without sampling raw props, 
+        // but for now we'll assume propertyName might be a numeric field in item
+        return { data: aggregation, unit: null }; // Master data path refinement needed if units stored
+    }
+
+    /**
+     * Calculates a single KPI value from the master dataset.
+     */
+    calculateKPI(masterData, propertyName, aggregationType = 'count', filters = [], logicalOperator = 'AND') {
+        if (!masterData || !Array.isArray(masterData)) return { value: 0, unit: null };
+
+        let filtered = masterData;
+        if (filters && filters.length > 0) {
+            filtered = masterData.filter(item => {
+                const conditionResults = filters.map(condition => {
+                    const val = item[condition.attribute] !== undefined ? String(item[condition.attribute]) : 'Undefined';
+
+                    switch (condition.operator) {
+                        case 'equals':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.includes(val);
+                            }
+                            return val === String(condition.value);
+                        case 'contains':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.some(v => val.toLowerCase().includes(v.toLowerCase()));
+                            }
+                            return val.toLowerCase().includes(String(condition.value).toLowerCase());
+                        case 'not_equals':
+                            if (Array.isArray(condition.value)) {
+                                return !condition.value.includes(val);
+                            }
+                            return val !== String(condition.value);
+                        default: return true;
+                    }
+                });
+                return logicalOperator === 'OR' ? conditionResults.some(r => r) : conditionResults.every(r => r);
+            });
+        }
+
+        let finalValue = 0;
+        let detectedUnit = null;
+
+        if (aggregationType === 'sum' && propertyName) {
+            finalValue = filtered.reduce((acc, item) => {
+                const rawVal = item[propertyName];
+                const val = parseFloat(rawVal);
+
+                // Try to detect unit from the first valid numeric string found
+                if (!detectedUnit && rawVal && typeof rawVal === 'string') {
+                    detectedUnit = this.extractUnit(rawVal);
+                }
+
+                return acc + (isNaN(val) ? 0 : val);
+            }, 0);
+        } else {
+            finalValue = filtered.length;
+        }
+
+        return { value: finalValue, unit: detectedUnit };
+    }
+
+    /**
+     * Extracts unique values for a property from the master dataset.
+     */
+    getUniqueValuesFromData(masterData, propertyName) {
+        if (!masterData || !Array.isArray(masterData)) return [];
+        const values = new Set();
+        masterData.forEach(item => {
+            const val = item[propertyName];
+            if (val !== undefined && val !== null) {
+                values.add(String(val));
+            }
+        });
+        return Array.from(values).sort();
     }
 
     /**
@@ -786,9 +952,21 @@ class AnalyticsService {
                     val = String(val);
 
                     switch (condition.operator) {
-                        case 'equals': return val === condition.value;
-                        case 'contains': return val.toLowerCase().includes(condition.value.toLowerCase());
-                        case 'not_equals': return val !== condition.value;
+                        case 'equals':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.includes(val);
+                            }
+                            return val === condition.value;
+                        case 'contains':
+                            if (Array.isArray(condition.value)) {
+                                return condition.value.some(v => val.toLowerCase().includes(v.toLowerCase()));
+                            }
+                            return val.toLowerCase().includes(condition.value.toLowerCase());
+                        case 'not_equals':
+                            if (Array.isArray(condition.value)) {
+                                return !condition.value.includes(val);
+                            }
+                            return val !== condition.value;
                         default: return true;
                     }
                 });
@@ -797,7 +975,8 @@ class AnalyticsService {
 
             if (passed) {
                 const values = propertyNames.map(name => {
-                    return item[name] !== undefined ? item[name] : 'Undefined';
+                    const val = item[name] !== undefined ? item[name] : 'Undefined';
+                    return val instanceof Date ? val.toLocaleDateString() : val;
                 });
                 const key = JSON.stringify(values);
 

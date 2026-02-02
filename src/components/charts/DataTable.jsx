@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import analyticsService from '../../services/analyticsService';
 
-const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData }) => {
+const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData, timelineDate, globalSync, scopedDbIds }) => {
     const { title = 'Data Table', data: customData, attribute, attributes = [], filters, logicalOperator } = config;
     const [tableData, setTableData] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -14,7 +14,7 @@ const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData })
         if (viewer && targetAttributes.length > 0) {
             loadModelData();
         }
-    }, [viewer, JSON.stringify(targetAttributes), JSON.stringify(filters), logicalOperator, masterData, joinedData]);
+    }, [viewer, JSON.stringify(targetAttributes), JSON.stringify(filters), logicalOperator, masterData, joinedData, timelineDate, globalSync, config.timelineDateAttribute, JSON.stringify(scopedDbIds)]);
 
     const loadModelData = async () => {
         setLoading(true);
@@ -25,7 +25,26 @@ const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData })
             if (masterData && masterData.length > 0) {
                 // FAST PATH: Sync Table generation
                 console.log('[DataTable] Using Master Data');
-                data = analyticsService.getTableDataFromMaster(masterData, targetAttributes, filters, logicalOperator);
+                let targetData = masterData;
+
+                // --- TIMELINE SYNC FILTER ---
+                if (globalSync && timelineDate) {
+                    const dateAttr = config.timelineDateAttribute || 'Start Date'; // Fallback
+                    targetData = masterData.filter(row => {
+                        const val = row[dateAttr];
+                        if (!val) return false;
+                        const rowDate = new Date(val);
+                        return !isNaN(rowDate.getTime()) && rowDate <= timelineDate;
+                    });
+                }
+
+                // --- GLOBAL SYNC (CROSS-FILTER) ---
+                if (globalSync && scopedDbIds && scopedDbIds.length > 0) {
+                    const scopeSet = new Set(scopedDbIds);
+                    targetData = targetData.filter(row => scopeSet.has(row.dbId));
+                }
+
+                data = analyticsService.getTableDataFromMaster(targetData, targetAttributes, filters, logicalOperator);
                 // We need agg for total count calculation
                 // For now, reconstruct 'agg' or simplify total calc
                 const tempAgg = {};
@@ -103,7 +122,7 @@ const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData })
             <div style={{ flex: 1, overflow: 'auto', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                        <tr style={{ background: 'var(--color-bg-highlight)', position: 'sticky', top: 0, zIndex: 1 }}>
+                        <tr style={{ background: 'var(--color-bg-elevated)', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 1 }}>
                             {data.headers.map((header, index) => (
                                 <th key={index} style={{ padding: '12px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '800', color: 'var(--color-text-subdued)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                                     {header}
@@ -124,11 +143,28 @@ const DataTable = ({ config = {}, viewer, onDataClick, masterData, joinedData })
                                 onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
                                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                             >
-                                {row.slice(0, data.headers.length).map((cell, cellIndex) => (
-                                    <td key={cellIndex} style={{ padding: '12px', fontSize: '0.85rem', color: cellIndex === 0 ? 'white' : 'var(--color-text-subdued)' }}>
-                                        {cell}
-                                    </td>
-                                ))}
+                                {row.slice(0, data.headers.length).map((cell, cellIndex) => {
+                                    // Auto-format numeric cells except 'Count'
+                                    let content = cell;
+
+                                    if (cell instanceof Date) {
+                                        content = cell.toLocaleDateString();
+                                    } else {
+                                        const isNumeric = !isNaN(parseFloat(cell)) && isFinite(cell);
+                                        if (isNumeric && data.headers[cellIndex] !== 'Count' && !String(cell).includes('%')) {
+                                            content = analyticsService.formatValue(cell, {
+                                                exact: config.exact !== undefined ? config.exact : true,
+                                                decimals: 2
+                                            });
+                                        }
+                                    }
+
+                                    return (
+                                        <td key={cellIndex} style={{ padding: '12px', fontSize: '0.85rem', color: cellIndex === 0 ? 'var(--color-text-base)' : 'var(--color-text-subdued)' }}>
+                                            {content}
+                                        </td>
+                                    );
+                                })}
                             </tr>
                         ))}
                     </tbody>

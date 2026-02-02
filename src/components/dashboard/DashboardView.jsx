@@ -14,6 +14,9 @@ import AIChatBot from '../ai/AIChatBot';
 import PropertyFilter from './PropertyFilter';
 import ScheduleVisual from '../charts/ScheduleVisual';
 import exportUtils from '../../utils/exportUtils';
+import { analyticsService } from '../../services/analyticsService';
+import apsService from '../../services/apsService';
+import { RefreshCw, Zap, FileText, Edit2, LogOut, Loader2, Maximize2, Minimize2, MessageSquare, X } from 'lucide-react';
 
 const componentTypes = [
     { type: 'viewer', component: APSViewer },
@@ -23,8 +26,7 @@ const componentTypes = [
     { type: 'line', component: LineChart },
     { type: 'kpi', component: KPICard },
     { type: 'table', component: DataTable },
-    { type: 'schedule', component: ScheduleVisual },
-    { type: 'chatbot', component: AIChatBot }
+    { type: 'schedule', component: ScheduleVisual }
 ];
 
 class ErrorBoundary extends React.Component {
@@ -57,11 +59,10 @@ class ErrorBoundary extends React.Component {
     }
 }
 
-import { analyticsService } from '../../services/analyticsService';
-import apsService from '../../services/apsService';
+
 
 const DashboardView = () => {
-    const { id } = useParams();
+    const { projectId, id } = useParams();
     const navigate = useNavigate();
     const [dashboard, setDashboard] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -69,9 +70,18 @@ const DashboardView = () => {
     const [modelLoaded, setModelLoaded] = useState(false);
     const [globalModel, setGlobalModel] = useState(null);
 
-    // Interaction Sync State - Default to true for consumers
+    // Unified Sync State
     const [currentSelection, setCurrentSelection] = useState([]);
-    const [interactionSync, setInteractionSync] = useState(true);
+    const [masterData, setMasterData] = useState([]);
+    const [globalSync, setGlobalSync] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [timelineDate, setTimelineDate] = useState(null);
+    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isAIChatOpen, setIsAIChatOpen] = useState(false);
+
+    useEffect(() => {
+        // EVA icons removed
+    }, [dashboard, isRefreshing, globalSync]);
 
     useEffect(() => {
         try {
@@ -98,28 +108,60 @@ const DashboardView = () => {
         }
     }, [id]);
 
-    // Unified Data State (Master Data)
-    const [masterData, setMasterData] = useState([]);
+
+
+    // Unified Data State
+    const [availableProperties, setAvailableProperties] = useState([]);
+    const [propertiesLoading, setPropertiesLoading] = useState(false);
 
 
 
     // Responsive Canvas Logic
-    const [canvasWidth, setCanvasWidth] = useState(1200);
+    // Initialize with mostly full width (subtracting approximate padding) to prevent "shrink" effect on load
+    const [canvasWidth, setCanvasWidth] = useState(window.innerWidth - 48);
     const canvasRef = useRef(null);
+    const containerRef = useRef(null); // Ref for global container to maximize
 
     useEffect(() => {
         if (!canvasRef.current) return;
 
         const resizeObserver = new ResizeObserver(entries => {
             for (let entry of entries) {
-                // Subtract padding if needed, assuming 40px for safety (20px padding * 2)
-                setCanvasWidth(entry.contentRect.width - 40);
+                // Subtract 48px padding (24px * 2) to match DashboardBuilder consistency
+                const newWidth = entry.contentRect.width;
+                if (newWidth > 100) { // Safety check to avoid zero/small width glitches
+                    setCanvasWidth(newWidth);
+                }
             }
         });
 
         resizeObserver.observe(canvasRef.current);
         return () => resizeObserver.disconnect();
     }, []);
+
+    // Full Screen Logic
+    useEffect(() => {
+        const handleFullScreenChange = () => {
+            setIsFullScreen(!!document.fullscreenElement);
+        };
+
+        document.addEventListener('fullscreenchange', handleFullScreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+    }, []);
+
+    const toggleFullScreen = async () => {
+        if (!containerRef.current) return;
+
+        try {
+            if (!document.fullscreenElement) {
+                await containerRef.current.requestFullscreen();
+            } else {
+                await document.exitFullscreen();
+            }
+        } catch (err) {
+            console.error("Error toggling full screen:", err);
+        }
+    };
 
     // Auto-load data when model is ready (replacing old processJoins)
     const handleModelLoaded = async (viewerInstance) => {
@@ -130,6 +172,8 @@ const DashboardView = () => {
             setViewer(targetViewer);
             // Trigger initial data load
             await refreshData(targetViewer);
+            // Also explicitly fetch properties (redundant with refreshData but safer for initial load)
+            await fetchProperties(targetViewer);
         }
     };
 
@@ -139,8 +183,8 @@ const DashboardView = () => {
         // Listen for selection changes
         try {
             viewerInstance.addEventListener(window.Autodesk.Viewing.SELECTION_CHANGED_EVENT, (event) => {
-                // Check current sync state from ref or state (ensure closure freshness)
-                if (!interactionSync) return;
+                // Check current sync state
+                if (!globalSync) return;
                 const selection = viewerInstance.getSelection();
                 setCurrentSelection(selection);
             });
@@ -198,6 +242,27 @@ const DashboardView = () => {
         }
     };
 
+    const fetchProperties = async (viewerInstance) => {
+        if (!viewerInstance || !dashboard?.projectData) return;
+
+        // Pre-populate from masterData if available for instant UI
+        if (masterData && masterData.length > 0) {
+            const keys = Object.keys(masterData[0]).filter(k => k !== 'dbId' && k !== 'name' && k !== 'id');
+            setAvailableProperties(keys.sort());
+        }
+
+        setPropertiesLoading(true);
+        try {
+            const props = await analyticsService.getUnifiedPropertyNames(viewerInstance, dashboard.projectData);
+            setAvailableProperties(props);
+            console.log('[DashboardView] Properties updated:', props.length);
+        } catch (err) {
+            console.error('[DashboardView] Failed to fetch properties:', err);
+        } finally {
+            setPropertiesLoading(false);
+        }
+    };
+
     const renderComponent = (comp) => {
         const componentObj = componentTypes.find(c => c.type === comp.type);
         if (!componentObj) return null;
@@ -222,15 +287,18 @@ const DashboardView = () => {
                     viewer={modelLoaded ? viewer : null}
                     onDataClick={handleFilterClicked}
                     onThematicColorChange={handleThematicColorChange}
-                    scopedDbIds={interactionSync && currentSelection.length > 0 ? currentSelection : null}
+                    scopedDbIds={globalSync && currentSelection.length > 0 ? currentSelection : null}
+                    globalSync={globalSync}
                     masterData={masterData}
+                    availableProperties={availableProperties}
+                    propertiesLoading={propertiesLoading}
+                    timelineDate={timelineDate}
+                    onTimelineDateChange={setTimelineDate}
                 />
             </div>
         );
     };
 
-    // State for refresh loading
-    const [isRefreshing, setIsRefreshing] = useState(false);
 
     const refreshData = async (viewerOverride = null) => {
         const targetViewer = viewerOverride || viewer;
@@ -253,7 +321,7 @@ const DashboardView = () => {
                         if (source.fileUrn && source.type === 'excel') {
                             try {
                                 const arrayBuffer = await apsService.getFileContent(source.fileUrn, token);
-                                const workbook = window.XLSX.read(arrayBuffer, { type: 'array' });
+                                const workbook = window.XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
                                 const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
                                 newSources[key] = { ...source, data: jsonData, lastUpdated: new Date().toISOString() };
                             } catch (e) { console.error('Refesh error', e); }
@@ -268,11 +336,80 @@ const DashboardView = () => {
                 // Update local dashboard state to keep it in sync
                 setDashboard(prev => ({ ...prev, projectData: updatedProjectData }));
 
-                const allData = await analyticsService.getAllData(targetViewer, updatedProjectData);
-                if (allData && allData.length > 0) {
-                    setMasterData(allData);
-                    console.log('[DashboardView] Master Data Processed:', allData.length);
+                // Prepare Property List for Fetching
+                let modelPropsToFetch = null;
+                if (updatedProjectData.schemaConfig && updatedProjectData.schemaConfig.properties) {
+                    modelPropsToFetch = Object.values(updatedProjectData.schemaConfig.properties)
+                        .filter(p => p.source === 'model' && p.include)
+                        .map(p => p.originalName);
+
+                    Object.values(updatedProjectData.sources).forEach(src => {
+                        if (src.mapping?.modelKey) modelPropsToFetch.push(src.mapping.modelKey);
+                    });
+                    modelPropsToFetch = [...new Set(modelPropsToFetch)];
                 }
+
+                const allData = await analyticsService.getAllData(targetViewer, updatedProjectData, modelPropsToFetch);
+
+                if (allData && allData.results) {
+                    let results = allData.results || [];
+
+                    // Apply Schema Transformations
+                    if (updatedProjectData.schemaConfig && updatedProjectData.schemaConfig.properties) {
+                        const schemaProps = Object.values(updatedProjectData.schemaConfig.properties).filter(p => p.include);
+
+                        results = results.map(row => {
+                            const newRow = { dbId: row.dbId, name: row.name };
+
+                            schemaProps.forEach(prop => {
+                                const val = row[prop.originalName];
+                                const finalKey = prop.alias || prop.originalName;
+
+                                // Collision Prevention
+                                if (newRow[finalKey] !== undefined && (val === undefined || val === null || val === '')) {
+                                    return;
+                                }
+
+                                // Type Conversion
+                                let finalVal = val;
+                                if (val !== undefined && val !== null && val !== '') {
+                                    if (prop.type === 'number') {
+                                        const num = parseFloat(val);
+                                        finalVal = isNaN(num) ? 0 : num;
+                                    } else if (prop.type === 'date') {
+                                        if (val instanceof Date) {
+                                            finalVal = val;
+                                        } else if (typeof val === 'number' && val > 30000) {
+                                            finalVal = new Date(Math.round((val - 25569) * 86400 * 1000));
+                                        } else {
+                                            const date = new Date(val);
+                                            finalVal = isNaN(date.getTime()) ? val : date;
+                                        }
+
+                                        if (finalVal instanceof Date && finalVal.getFullYear() <= 1970 && val !== 0 && val !== '0') {
+                                            finalVal = val;
+                                        }
+                                    } else if (prop.type === 'boolean') {
+                                        const strVal = String(val).toLowerCase();
+                                        finalVal = strVal === 'true' || strVal === '1' || strVal === 'yes';
+                                    } else {
+                                        finalVal = String(val);
+                                    }
+                                } else {
+                                    finalVal = null;
+                                }
+                                newRow[finalKey] = finalVal;
+                            });
+                            return newRow;
+                        });
+                    }
+
+                    setMasterData(results);
+                    console.log('[DashboardView] Master Data Processed:', results.length);
+                }
+
+                // Refresh property list for UI
+                await fetchProperties(targetViewer);
             }
 
         } catch (error) {
@@ -289,8 +426,9 @@ const DashboardView = () => {
                 <motion.div
                     animate={{ rotate: 360 }}
                     transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                    style={{ fontSize: '3rem' }}
-                >⚙️</motion.div>
+                >
+                    <Loader2 className="w-12 h-12 text-lime-400" />
+                </motion.div>
             </div>
         );
     }
@@ -299,7 +437,7 @@ const DashboardView = () => {
         return (
             <div style={{ padding: '40px', textAlign: 'center', color: 'white' }}>
                 <h2>Dashboard Not Found</h2>
-                <button onClick={() => navigate('/overview')} className="btn btn-primary">Back</button>
+                <button onClick={() => navigate(projectId ? `/project/${projectId}` : '/projects')} className="btn btn-primary">Back</button>
             </div>
         );
     }
@@ -308,78 +446,104 @@ const DashboardView = () => {
     const layout = Array.isArray(dashboard.layout) ? dashboard.layout : [];
 
     return (
-        <ErrorBoundary onBack={() => navigate('/overview')}>
+        <ErrorBoundary onBack={() => navigate(projectId ? `/project/${projectId}` : '/projects')}>
             <motion.div
+                ref={containerRef}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                style={{ width: '100%', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
+                className="w-full min-h-screen flex flex-col bg-[var(--color-bg-base)] p-8"
+                style={{ overflowY: 'auto' }}
             >
                 {/* Header */}
-                <div style={{
-                    padding: 'var(--spacing-lg)',
-                    borderBottom: '1px solid var(--color-border)',
-                    background: 'var(--color-bg-elevated)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    zIndex: 10
-                }}>
+                <div className="p-6 border-b border-[var(--color-border)] bg-[var(--color-bg-base)]/80 backdrop-blur-md flex justify-between items-center z-10 sticky top-0 transition-colors duration-200">
                     <div>
-                        <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>{dashboard.name}</h1>
-                        <p style={{ color: 'var(--color-text-subdued)', margin: 0 }}>{dashboard.description}</p>
+                        <h1 className="text-2xl font-black text-[var(--color-text-base)] m-0 tracking-tight">{dashboard.name}</h1>
+                        <p className="text-[var(--color-text-muted)] text-sm mt-1">{dashboard.description}</p>
                     </div>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <div className="flex gap-3 items-center">
+                        <button
+                            onClick={toggleFullScreen}
+                            className="p-2.5 bg-white/5 hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white rounded-xl transition-all"
+                            title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+                        >
+                            {isFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                        </button>
                         <button
                             onClick={refreshData}
                             disabled={isRefreshing}
-                            className="btn btn-secondary"
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                            className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-base)] rounded-full font-medium hover:bg-[var(--color-hover)] transition-colors flex items-center gap-2 px-5 py-2 text-sm"
                         >
                             {isRefreshing ? (
-                                <div className="spinner-sm" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                                <span>🔄</span>
+                                <span>
+                                    <RefreshCw className="w-4 h-4" />
+                                </span>
                             )}
-                            {isRefreshing ? 'Refreshing & Calculating...' : 'Refresh Data'}
+                            {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setCurrentSelection([]);
+                                setTimelineDate(null); // Stop 4D Timeline
+                                if (viewer) {
+                                    viewer.clearSelection();
+                                    viewer.showAll();
+                                }
+                            }}
+                            className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-red-400 rounded-full font-medium hover:bg-red-400/5 transition-all flex items-center gap-2 px-4 py-2 text-xs"
+                            title="Clear all filters and selections"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                            CLEAR
                         </button>
 
                         {viewer && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '16px', padding: '6px 12px', background: 'var(--color-bg-base)', borderRadius: '20px', border: '1px solid var(--color-border)' }}>
-                                <label style={{ fontSize: '12px', fontWeight: '600', color: interactionSync ? 'var(--color-primary)' : 'var(--color-text-subdued)', cursor: 'pointer' }}>
-                                    ⚡ SYNC
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-bg-elevated)] rounded-full border border-[var(--color-border)]">
+                                <label className={`text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 ${globalSync ? 'text-lime-400' : 'text-[var(--color-text-muted)]'}`}>
+                                    <span>
+                                        <Zap className={`w-3.5 h-3.5 ${globalSync ? 'text-lime-400' : 'text-[var(--color-text-muted)]'}`} />
+                                    </span>
+                                    SYNC
                                 </label>
                                 <div
                                     onClick={() => {
-                                        setInteractionSync(!interactionSync);
-                                        if (interactionSync) setCurrentSelection([]);
+                                        setGlobalSync(!globalSync);
+                                        if (globalSync) setCurrentSelection([]);
                                     }}
-                                    style={{
-                                        width: '32px', height: '18px',
-                                        background: interactionSync ? 'var(--color-primary)' : 'gray',
-                                        borderRadius: '9px', position: 'relative', cursor: 'pointer', transition: 'all 0.2s'
-                                    }}
+                                    className={`w-8 h-[18px] rounded-full relative cursor-pointer transition-colors border border-[var(--color-border)] flex-shrink-0 ${globalSync ? 'bg-lime-500' : 'bg-[var(--color-bg-base)]'}`}
                                 >
-                                    <div style={{
-                                        width: '14px', height: '14px', background: 'white', borderRadius: '50%',
-                                        position: 'absolute', top: '2px', left: interactionSync ? '16px' : '2px', transition: 'all 0.2s'
-                                    }} />
+                                    <div className={`w-[14px] h-[14px] bg-white rounded-full absolute top-[1px] transition-all ${globalSync ? 'left-[15px]' : 'left-[1px]'}`} />
                                 </div>
                             </div>
                         )}
                         <button
-                            className="btn btn-secondary"
+                            className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-base)] rounded-full font-medium hover:bg-[var(--color-hover)] transition-colors flex items-center gap-2 px-5 py-2 text-sm"
                             onClick={() => exportUtils.exportToHTML(dashboard, 'dashboard-canvas')}
-                            style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
                         >
-                            <span>📄</span> EXPORT HTML
+                            <span>
+                                <FileText className="w-4 h-4 text-cyan-400" />
+                            </span>
+                            Export HTML
                         </button>
-                        <button onClick={() => navigate(`/dashboard/edit/${id}`)} className="btn btn-secondary">✏️ Edit</button>
-                        <button onClick={() => navigate('/overview')} className="btn btn-secondary">Exit</button>
+                        <button onClick={() => navigate(projectId ? `/project/${projectId}/dashboard/edit/${id}` : `/dashboard/edit/${id}`)} className="btn btn-secondary rounded-full flex items-center gap-2 border border-[var(--color-border)] text-[var(--color-text-base)] hover:bg-[var(--color-hover)] bg-[var(--color-bg-elevated)]">
+                            <span>
+                                <Edit2 className="w-4 h-4" />
+                            </span>
+                            Edit
+                        </button>
+                        <button onClick={() => navigate(projectId ? `/project/${projectId}` : '/projects')} className="btn btn-secondary rounded-full flex items-center gap-2 border border-[var(--color-border)] text-[var(--color-text-base)] hover:bg-[var(--color-hover)] bg-[var(--color-bg-elevated)]">
+                            <span>
+                                <LogOut className="w-4 h-4" />
+                            </span>
+                            Exit
+                        </button>
                     </div>
                 </div>
 
                 {/* Grid Layout */}
-                <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'auto', padding: '20px' }} id="dashboard-canvas">
+                <div ref={canvasRef} className="flex-1 relative overflow-auto p-6" id="dashboard-canvas">
                     <GridLayout
                         className="layout"
                         layout={layout}
@@ -390,12 +554,51 @@ const DashboardView = () => {
                         isResizable={false}
                     >
                         {dashboard.components.map(comp => (
-                            <div key={comp.id} style={{ border: '1px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden', background: 'var(--color-bg-elevated)' }}>
+                            <div key={comp.id} className="border border-white/5 rounded-2xl overflow-hidden bg-white/5 backdrop-blur-sm shadow-xl">
                                 {renderComponent(comp)}
                             </div>
                         ))}
                     </GridLayout>
                 </div>
+                {/* Floating AI Chat */}
+                <AnimatePresence>
+                    {isAIChatOpen ? (
+                        <AIChatBot
+                            isOpen={isAIChatOpen}
+                            onClose={() => setIsAIChatOpen(false)}
+                            viewer={viewer}
+                            onDataClick={(ids) => setCurrentSelection(ids)}
+                        />
+                    ) : (
+                        <motion.button
+                            initial={{ scale: 0, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={() => setIsAIChatOpen(true)}
+                            style={{
+                                position: 'fixed',
+                                bottom: '24px',
+                                right: '24px',
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '28px',
+                                background: 'var(--color-primary)',
+                                color: '#000',
+                                border: 'none',
+                                boxShadow: '0 8px 32px rgba(29, 185, 84, 0.4)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 9999,
+                                cursor: 'pointer'
+                            }}
+                            title="AI Assistant"
+                        >
+                            <MessageSquare className="w-6 h-6" />
+                        </motion.button>
+                    )}
+                </AnimatePresence>
             </motion.div>
         </ErrorBoundary>
     );

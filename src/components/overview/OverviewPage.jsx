@@ -1,21 +1,39 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import DashboardCard from './DashboardCard';
 import { storageService } from '../../services/storageService';
+import { ArrowLeft, Plus, LayoutGrid, BarChart3, Clock } from 'lucide-react';
 
 const OverviewPage = () => {
     const navigate = useNavigate();
+    const { projectId } = useParams();
     const [dashboards, setDashboards] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [project, setProject] = useState(null);
 
     useEffect(() => {
-        storageService.createSampleDashboards();
+        if (!projectId) return;
+
+        // storageService.createSampleDashboards(); // Removing auto-sample creation here, handled generally or via button?
+        // Actually sample creation handles default project.
+
+        loadProjectDetails();
         loadDashboards();
-    }, []);
+    }, [projectId]);
+
+    const loadProjectDetails = () => {
+        const proj = storageService.getProject(projectId);
+        if (proj) {
+            setProject(proj);
+        } else {
+            // Project not found? Redirect?
+            // navigate('/projects');
+        }
+    };
 
     const loadDashboards = () => {
-        const data = storageService.getAllDashboards();
+        const data = storageService.getDashboardsByProject(projectId);
         setDashboards(data);
     };
 
@@ -24,56 +42,55 @@ const OverviewPage = () => {
             dashboard.description.toLowerCase().includes(searchQuery.toLowerCase());
     });
 
+    if (!project) return <div className="p-8 text-white">Loading project...</div>;
+
     return (
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            style={{ width: '100%', maxWidth: '1800px' }}
+            className="w-full max-w-[1800px] mx-auto p-8"
         >
-            {/* Quick Actions */}
-            <div style={{
-                display: 'flex',
-                gap: 'var(--spacing-md)',
-                marginBottom: 'var(--spacing-xl)'
-            }}>
-                <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => navigate('/dashboard/new')}
-                    className="btn btn-primary"
-                    style={{
-                        padding: '14px 28px',
-                        fontSize: 'var(--font-size-sm)'
-                    }}
-                >
-                    ➕ Create Dashboard
-                </motion.button>
+            {/* Header Section */}
+            <div className="flex justify-between items-end mb-8 border-b border-[var(--color-border)] pb-6">
+                <div>
+                    <div className="flex items-center gap-2 text-sm text-lime-400 font-mono uppercase tracking-widest mb-2 cursor-pointer hover:underline" onClick={() => navigate('/projects')}>
+                        <ArrowLeft className="w-4 h-4" /> Back to Projects
+                    </div>
+                    <h1 className="text-4xl font-black text-[var(--color-text-base)] tracking-tight">
+                        {project.name}
+                    </h1>
+                    <p className="text-[var(--color-text-muted)] mt-1 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-lime-400"></span>
+                        {project.hubName}
+                    </p>
+                </div>
+
+                <div className="flex gap-4">
+                    <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigate(`/project/${projectId}/dashboard/new`)}
+                        className="btn btn-primary py-3 px-8 text-sm shadow-[0_0_15px_rgba(204,246,85,0.3)] hover:shadow-[0_0_25px_rgba(204,246,85,0.5)] transition-shadow flex items-center gap-2"
+                    >
+                        <span>
+                            <Plus className="w-4 h-4" />
+                        </span>
+                        Create Dashboard
+                    </motion.button>
+                </div>
             </div>
 
             {/* Section: Recent Dashboards */}
-            <section style={{ marginBottom: 'var(--spacing-3xl)' }}>
-                <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 'var(--spacing-lg)'
-                }}>
-                    <h2 style={{
-                        fontSize: 'var(--font-size-2xl)',
-                        fontWeight: 'var(--font-weight-bold)',
-                        color: 'var(--color-text-base)'
-                    }}>
-                        Your Dashboards
+            <section className="mb-16">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-3xl font-bold text-[var(--color-text-base)] tracking-tight">
+                        Dashboards
                     </h2>
                 </div>
 
                 {filteredDashboards.length > 0 ? (
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                        gap: 'var(--spacing-lg)'
-                    }}>
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6">
                         {filteredDashboards.map((dashboard, index) => (
                             <motion.div
                                 key={dashboard.id}
@@ -84,6 +101,12 @@ const OverviewPage = () => {
                                 <DashboardCard
                                     dashboard={dashboard}
                                     onDelete={loadDashboards}
+                                    // Need to pass projectId to card if it constructs URL?
+                                    // Card usually does navigate(`/dashboard/view/${dashboard.id}`)
+                                    // We need to update Card too or pass a custom navigate handler.
+                                    // Let's assume we update Card next or handle it here via context.
+                                    // Actually, let's update DashboardCard or pass a base URL.
+                                    basePath={`/project/${projectId}/dashboard`}
                                 />
                             </motion.div>
                         ))}
@@ -92,29 +115,17 @@ const OverviewPage = () => {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        style={{
-                            padding: 'var(--spacing-3xl)',
-                            textAlign: 'center',
-                            background: 'var(--color-bg-elevated)',
-                            borderRadius: 'var(--radius-lg)'
-                        }}
+                        className="p-16 text-center bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-3xl backdrop-blur-md flex flex-col items-center justify-center max-w-2xl mx-auto shadow-lg"
                     >
-                        <div style={{ fontSize: '64px', marginBottom: 'var(--spacing-lg)' }}>
-                            📊
+                        <div className="text-7xl mb-6 opacity-30">
+                            <span>
+                                <LayoutGrid className="w-16 h-16 animate-pulse text-[var(--color-text-muted)]" />
+                            </span>
                         </div>
-                        <h3 style={{
-                            fontSize: 'var(--font-size-2xl)',
-                            fontWeight: 'var(--font-weight-bold)',
-                            marginBottom: 'var(--spacing-sm)',
-                            color: 'var(--color-text-base)'
-                        }}>
+                        <h3 className="text-2xl font-bold mb-2 text-[var(--color-text-base)]">
                             {searchQuery ? 'No dashboards found' : 'Create your first dashboard'}
                         </h3>
-                        <p style={{
-                            fontSize: 'var(--font-size-base)',
-                            color: 'var(--color-text-subdued)',
-                            marginBottom: 'var(--spacing-xl)'
-                        }}>
+                        <p className="text-[var(--color-text-muted)] mb-8 text-lg">
                             {searchQuery
                                 ? 'Try adjusting your search query'
                                 : 'Get started with analytics and 3D model insights'
@@ -124,10 +135,13 @@ const OverviewPage = () => {
                             <motion.button
                                 whileHover={{ scale: 1.04 }}
                                 whileTap={{ scale: 0.96 }}
-                                onClick={() => navigate('/dashboard/new')}
-                                className="btn btn-primary"
+                                onClick={() => navigate(`/project/${projectId}/dashboard/new`)}
+                                className="btn btn-primary flex items-center gap-2"
                             >
-                                ➕ Create Dashboard
+                                <span>
+                                    <Plus className="w-4 h-4" />
+                                </span>
+                                Create Dashboard
                             </motion.button>
                         )}
                     </motion.div>
@@ -136,27 +150,18 @@ const OverviewPage = () => {
 
             {/* Section: Quick Stats */}
             {dashboards.length > 0 && (
-                <section style={{ marginBottom: 'var(--spacing-3xl)' }}>
-                    <h2 style={{
-                        fontSize: 'var(--font-size-xl)',
-                        fontWeight: 'var(--font-weight-bold)',
-                        color: 'var(--color-text-base)',
-                        marginBottom: 'var(--spacing-lg)'
-                    }}>
-                        Overview
+                <section className="mb-16">
+                    <h2 className="text-2xl font-bold text-[var(--color-text-base)] mb-6 tracking-tight">
+                        Project Overview
                     </h2>
 
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                        gap: 'var(--spacing-md)'
-                    }}>
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
                         {[
                             {
                                 label: 'Total Dashboards',
                                 value: dashboards.length,
-                                icon: '📊',
-                                color: 'var(--color-primary)'
+                                Icon: BarChart3,
+                                color: 'text-lime-400'
                             },
                             {
                                 label: 'Updated This Week',
@@ -164,49 +169,27 @@ const OverviewPage = () => {
                                     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                                     return new Date(d.updatedAt) > weekAgo;
                                 }).length,
-                                icon: '🕒',
-                                color: 'var(--color-accent-blue)'
+                                Icon: Clock,
+                                color: 'text-cyan-400'
                             },
-                            {
-                                label: 'Total Components',
-                                value: dashboards.reduce((sum, d) => sum + (d.components?.length || 0), 0),
-                                icon: '🧩',
-                                color: 'var(--color-accent-purple)'
-                            }
                         ].map((stat, index) => (
                             <motion.div
                                 key={stat.label}
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.3 + index * 0.1 }}
-                                style={{
-                                    background: 'var(--color-bg-elevated)',
-                                    borderRadius: 'var(--radius-md)',
-                                    padding: 'var(--spacing-lg)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 'var(--spacing-md)'
-                                }}
+                                className="bg-[var(--color-bg-elevated)] rounded-xl border border-[var(--color-border)] p-6 flex items-center gap-6 hover:bg-[var(--color-hover)] transition-colors shadow-sm"
                             >
-                                <div style={{
-                                    fontSize: '32px'
-                                }}>
-                                    {stat.icon}
+                                <div className={`text-4xl ${stat.color} opacity-80`}>
+                                    <span>
+                                        <stat.Icon className="w-10 h-10" />
+                                    </span>
                                 </div>
                                 <div>
-                                    <div style={{
-                                        fontSize: 'var(--font-size-3xl)',
-                                        fontWeight: 'var(--font-weight-black)',
-                                        color: stat.color,
-                                        lineHeight: 1
-                                    }}>
+                                    <div className={`text-4xl font-black ${stat.color} leading-none mb-1`}>
                                         {stat.value}
                                     </div>
-                                    <div style={{
-                                        fontSize: 'var(--font-size-sm)',
-                                        color: 'var(--color-text-subdued)',
-                                        marginTop: '4px'
-                                    }}>
+                                    <div className="text-sm text-[var(--color-text-muted)] font-medium uppercase tracking-wider">
                                         {stat.label}
                                     </div>
                                 </div>

@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { storageService } from '../../services/storageService';
+import { PlayCircle, Edit2, Trash2 } from 'lucide-react';
 
-const DashboardCard = ({ dashboard, onDelete }) => {
+const DashboardCard = ({ dashboard, onDelete, basePath = '/dashboard' }) => {
     const navigate = useNavigate();
 
     const formatDate = (dateString) => {
@@ -30,7 +31,7 @@ const DashboardCard = ({ dashboard, onDelete }) => {
         <motion.div
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => navigate(`/dashboard/view/${dashboard.id}`)}
+            onClick={() => navigate(`${basePath}/view/${dashboard.id}`)}
             style={{
                 background: 'var(--color-bg-elevated)',
                 borderRadius: 'var(--radius-md)',
@@ -41,27 +42,33 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                 transition: 'all var(--transition-base)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--spacing-md)'
+                gap: 'var(--spacing-md)',
+                border: '1px solid var(--color-border)'
             }}
             onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--color-bg-highlight)';
+                e.currentTarget.style.borderColor = 'var(--color-primary)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = 'var(--shadow-lg)';
             }}
             onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--color-bg-elevated)';
+                e.currentTarget.style.borderColor = 'var(--color-border)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
             }}
         >
             {/* Thumbnail */}
             <div style={{
                 width: '100%',
                 aspectRatio: '16 / 9',
-                background: 'var(--color-bg-press)',
+                background: 'var(--color-bg-base)',
                 borderRadius: 'var(--radius-sm)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '48px',
                 position: 'relative',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                border: '1px solid var(--color-border)'
             }}>
                 {dashboard.thumbnail}
 
@@ -87,10 +94,12 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: '24px',
-                        color: '#000',
+                        color: '#fff',
                         boxShadow: 'var(--shadow-lg)'
                     }}>
-                        ▶
+                        <span>
+                            <PlayCircle className="w-8 h-8" />
+                        </span>
                     </div>
                 </motion.div>
             </div>
@@ -111,7 +120,7 @@ const DashboardCard = ({ dashboard, onDelete }) => {
 
                 <p style={{
                     fontSize: 'var(--font-size-sm)',
-                    color: 'var(--color-text-subdued)',
+                    color: 'var(--color-text-muted)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -122,7 +131,7 @@ const DashboardCard = ({ dashboard, onDelete }) => {
 
                 <div style={{
                     fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-text-subdued)',
+                    color: 'var(--color-text-muted)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 'var(--spacing-sm)'
@@ -150,7 +159,7 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                     whileTap={{ scale: 0.9 }}
                     onClick={(e) => {
                         e.stopPropagation();
-                        navigate(`/dashboard/edit/${dashboard.id}`);
+                        navigate(`${basePath}/edit/${dashboard.id}`);
                     }}
                     style={{
                         width: '32px',
@@ -167,7 +176,9 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                     }}
                     title="Edit"
                 >
-                    ✏️
+                    <span>
+                        <Edit2 className="w-4 h-4" />
+                    </span>
                 </motion.button>
 
                 <motion.button
@@ -189,7 +200,9 @@ const DashboardCard = ({ dashboard, onDelete }) => {
                     }}
                     title="Delete"
                 >
-                    🗑️
+                    <span>
+                        <Trash2 className="w-4 h-4" />
+                    </span>
                 </motion.button>
             </motion.div>
         </motion.div>
